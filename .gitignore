@@ -1,0 +1,57 @@
+# PIV data folders to exclude
+Empty Tunnel PIV/
+y215_aoan11_aoafn11piv/
+y220_aoan04_aoafn16piv/
+y235_aoan04_aoafn06piv/
+y235_aoan11_aoafn11piv/
+y250_aoan04_aoafn04piv/
+y250_aoan04_aoafn04pivrepeat/
+y250_aoan04_aoafn06piv/
+calib_tools/
+
+# Individual scripts to exclude
+piv_precheck.m
+profilecheck.m
+stitching_test.m
+turbint_profilepiv.m
+velprofilepiv.m
+windowingdiagnostic.m
+PIV_stitchingv2.m
+
+# MATLAB autosaves and temporary files
+*.asv
+*.autosave
+*.m~
+*~
+
+# Simulink autosaves
+*.slxc
+slprj/
+*.slx.original
+*.slx.autosave
+
+# Code generation folders
+codegen/
+
+# MEX compiled files
+*.mex*
+*.mexw64
+*.mexa64
+*.mexmaci64
+
+# Log and temporary files
+*.log
+*.txt~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# VS Code settings
+.vscode/
+
+# Windows folder config
+[Dd]esktop.ini
+$RECYCLE.BIN/
