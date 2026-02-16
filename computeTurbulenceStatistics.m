@@ -1,24 +1,9 @@
 function turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, varargin)
-% COMPUTETURBULENCESTATISTICS Calculate velocity fluctuations and turbulence intensity
+% COMPUTETURBULENCESTATISTICS Calculate velocity fluctuations and turbulence statistics
 %
 % Syntax:
 %   turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField)
 %   turbStats = computeTurbulenceStatistics(..., 'Name', Value)
-
-% Example
-% turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, ...
-%     'VelocityThreshold', [0, 50], ...      % Valid velocity range in m/s
-%     'FluctuationThreshold', 10, ...        % Max reasonable fluctuation
-%     'MinValidFraction', 0.7);              % Need 70% valid frames per point
-% 
-% % For stricter quality control
-% turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, ...
-%     'VelocityThreshold', [5, 40], ...      % Tighter range
-%     'FluctuationThreshold', 5, ...         % More conservative
-%     'MinValidFraction', 0.8);              % Need 80% valid data
-
-
-
 %
 % Inputs:
 %   savePath          - Base path where loop folders are located
@@ -29,32 +14,46 @@ function turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVeloci
 %   'SaveIndividualFluctuations' - Save all frames for PDF analysis (default: true)
 %   'ForceRecompute'             - Recompute even if files exist (default: false)
 %   'Verbose'                    - Print progress messages (default: true)
+%   'ProcessFramesInChunks'      - Process frames in chunks to reduce peak RAM (default: false)
+%   'ChunkSize'                  - Number of frames per chunk (default: 30)
+%   'VelocityThreshold'          - [min, max] valid velocity in m/s (default: [0, 50])
+%   'FluctuationThreshold'       - Max reasonable fluctuation in m/s (default: 10)
+%   'MinValidFraction'           - Minimum fraction of valid frames per point (default: 0.7)
 %
 % Outputs:
 %   turbStats - Structure containing:
-%       .TI_u{cam}           - Turbulence intensity field for u component (m/s)
-%       .TI_v{cam}           - Turbulence intensity field for v component (m/s)
-%       .TI_u_mean(cam)      - Spatial-average TI_u (scalar)
-%       .TI_v_mean(cam)      - Spatial-average TI_v (scalar)
-%       .u_rms_mean_field    - Mean RMS field across all loops
-%       .u_rms_std           - Standard deviation of RMS across loops
+%       .u_variance{cam}          - Variance field <u'^2> in (m/s)^2
+%       .v_variance{cam}          - Variance field <v'^2> in (m/s)^2
+%       .u_rms{cam}               - RMS field sqrt(<u'^2>) in m/s
+%       .v_rms{cam}               - RMS field sqrt(<v'^2>) in m/s
+%       .u_rms_mean_scalar(cam)   - Spatial-average RMS in m/s
+%       .v_rms_mean_scalar(cam)   - Spatial-average RMS in m/s
+%       .u_variance_mean_scalar   - Spatial-average variance in (m/s)^2
+%
+% Notes:
+%   - Fluctuations: u' = u - U_mean (m/s)
+%   - Variance: <u'^2> (m/s)^2
+%   - RMS: sqrt(<u'^2>) (m/s)
+%   - Turbulence Intensity: <u'^2> / U_inf^2 (dimensionless) - compute separately
 %
 % File Structure Created:
 %   savePath/
 %   ├── loop=X/
 %   │   └── vel_fluctuations/
-%   │       └── fluctuations_all_frames.mat
-%   ├── loop_averaged_rms_statistics.mat
-%   └── turbulence_intensity_statistics.mat
+%   │       └── fluctuations_all_frames.mat (~2.58 GB per loop)
+%   ├── loop_averaged_variance_statistics.mat
+%   └── turbulence_statistics.mat
 %
 % Example:
 %   turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField);
+%   
 %   turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, ...
-%                                           'SaveIndividualFluctuations', true, ...
-%                                           'ForceRecompute', false);
+%       'VelocityThreshold', [0, 50], ...
+%       'FluctuationThreshold', 10, ...
+%       'MinValidFraction', 0.7);
 %
 % Author: Ashley Kwong
-% Date: 02/15/2026
+% Date: 02/16/2026
 
 %% Parse inputs
 p = inputParser;
@@ -66,9 +65,9 @@ addParameter(p, 'ForceRecompute', false, @islogical);
 addParameter(p, 'Verbose', true, @islogical);
 addParameter(p, 'ProcessFramesInChunks', false, @islogical);
 addParameter(p, 'ChunkSize', 30, @isnumeric);
-addParameter(p, 'VelocityThreshold', [0, 50], @isnumeric); % [min, max] valid velocity in m/s
-addParameter(p, 'FluctuationThreshold', 10, @isnumeric); % Max reasonable fluctuation in m/s
-addParameter(p, 'MinValidFraction', 0.7, @isnumeric); % Minimum fraction of valid frames per point
+addParameter(p, 'VelocityThreshold', [0, 50], @isnumeric);
+addParameter(p, 'FluctuationThreshold', 10, @isnumeric);
+addParameter(p, 'MinValidFraction', 0.7, @isnumeric);
 
 parse(p, savePath, totalLoops, avgVelocityField, varargin{:});
 
@@ -96,9 +95,7 @@ end
 % Get mean velocity for each camera
 meanU = avgVelocityField.u;
 meanV = avgVelocityField.v;
-% nLoops = length(totalLoops);
-nLoops = 1; 
-fprintf("Testing on loop 1 !!\n"); 
+nLoops = length(totalLoops);
 nCameras = length(meanU);
 
 % Create validity masks for mean fields
@@ -117,9 +114,9 @@ end
 
 % Preallocate structure for loop-averaged statistics
 loopStats = struct();
-loopStats.u_rms_mean = cell(nLoops, nCameras);
-loopStats.v_rms_mean = cell(nLoops, nCameras);
-loopStats.valid_fraction = cell(nLoops, nCameras); % Track data quality
+loopStats.u_variance_mean = cell(nLoops, nCameras);    % Variance <u'^2> in (m/s)^2
+loopStats.v_variance_mean = cell(nLoops, nCameras);    % Variance <v'^2> in (m/s)^2
+loopStats.valid_fraction = cell(nLoops, nCameras);     % Track data quality
 
 %% Process each loop
 for loopNo = 1:nLoops
@@ -159,10 +156,11 @@ for loopNo = 1:nLoops
         fluctuations = struct();
         fluctuations.u_prime = cell(nFrames, nCameras);
         fluctuations.v_prime = cell(nFrames, nCameras);
-        fluctuations.valid_mask = cell(nFrames, nCameras); % Store validity per frame
+        fluctuations.valid_mask = cell(nFrames, nCameras);
         fluctuations.loop_name = totalLoops(loopNo).name;
         fluctuations.n_frames = nFrames;
         fluctuations.n_cameras = nCameras;
+        fluctuations.description = 'Velocity fluctuations: u'' = u - U_mean, v'' = v - V_mean (m/s)';
         
         % Process each camera
         for cam = 1:nCameras
@@ -182,7 +180,7 @@ for loopNo = 1:nLoops
                           u_inst >= VEL_MIN & u_inst <= VEL_MAX & ...
                           v_inst >= VEL_MIN & v_inst <= VEL_MAX;
                 
-                % Calculate fluctuations
+                % Calculate fluctuations: u' = u - U_mean (m/s)
                 u_prime = single(u_inst - meanU{cam});
                 v_prime = single(v_inst - meanV{cam});
                 
@@ -225,41 +223,44 @@ for loopNo = 1:nLoops
         clear allCameras;
     end
     
-    % Calculate loop-averaged RMS with proper masking
+    % Calculate loop-averaged variance with proper masking
     if VERBOSE
-        fprintf('  Computing loop-averaged RMS statistics...\n');
+        fprintf('  Computing loop-averaged variance statistics...\n');
     end
     
     for cam = 1:nCameras
-        u_rms_sum = zeros(size(fluctuations.u_prime{1, cam}), 'single');
-        v_rms_sum = zeros(size(fluctuations.v_prime{1, cam}), 'single');
+        u_variance_sum = zeros(size(fluctuations.u_prime{1, cam}), 'single');
+        v_variance_sum = zeros(size(fluctuations.v_prime{1, cam}), 'single');
         valid_count = zeros(size(fluctuations.u_prime{1, cam}), 'single');
- 
+        
         for frame = 1:nFrames
-            u_sq = fluctuations.u_prime{frame, cam}.^2;
-            v_sq = fluctuations.v_prime{frame, cam}.^2;
+            u_sq = fluctuations.u_prime{frame, cam}.^2;  % u'^2 in (m/s)^2
+            v_sq = fluctuations.v_prime{frame, cam}.^2;  % v'^2 in (m/s)^2
             
             valid = ~isnan(u_sq) & ~isnan(v_sq);
             
-            u_rms_sum(valid) = u_rms_sum(valid) + u_sq(valid);
-            v_rms_sum(valid) = v_rms_sum(valid) + v_sq(valid);
+            % Accumulate squared fluctuations (variance)
+            u_variance_sum(valid) = u_variance_sum(valid) + u_sq(valid);
+            v_variance_sum(valid) = v_variance_sum(valid) + v_sq(valid);
             valid_count = valid_count + single(valid);
         end
         
         % Calculate valid data fraction
         valid_frac = valid_count / nFrames;
         
-        % Only compute RMS where we have sufficient valid data
+        % Only compute variance where we have sufficient valid data
         sufficient_data = valid_frac >= MIN_VALID_FRAC;
         
-        u_rms = NaN(size(u_rms_sum), 'single');
-        v_rms = NaN(size(v_rms_sum), 'single');
+        u_variance = NaN(size(u_variance_sum), 'single');
+        v_variance = NaN(size(v_variance_sum), 'single');
         
-        u_rms(sufficient_data) = u_rms_sum(sufficient_data) ./ valid_count(sufficient_data);
-        v_rms(sufficient_data) = v_rms_sum(sufficient_data) ./ valid_count(sufficient_data);
+        % Mean variance: <u'^2> in (m/s)^2
+        u_variance(sufficient_data) = u_variance_sum(sufficient_data) ./ valid_count(sufficient_data);
+        v_variance(sufficient_data) = v_variance_sum(sufficient_data) ./ valid_count(sufficient_data);
         
-        loopStats.u_rms_mean{loopNo, cam} = u_rms;
-        loopStats.v_rms_mean{loopNo, cam} = v_rms;
+        % Store variance (NOT RMS!)
+        loopStats.u_variance_mean{loopNo, cam} = u_variance;  % <u'^2> in (m/s)^2
+        loopStats.v_variance_mean{loopNo, cam} = v_variance;  % <v'^2> in (m/s)^2
         loopStats.valid_fraction{loopNo, cam} = valid_frac;
         
         if VERBOSE
@@ -268,7 +269,7 @@ for loopNo = 1:nLoops
         end
     end
     
-    clear fluctuations u_rms_sum v_rms_sum valid_count;
+    clear fluctuations u_variance_sum v_variance_sum valid_count;
     
     if loopNo < nLoops
         pause(0.1);
@@ -276,19 +277,19 @@ for loopNo = 1:nLoops
 end
 
 % Save loop-averaged statistics
-loopStatsFile = fullfile(savePath, 'loop_averaged_rms_statistics.mat');
+loopStatsFile = fullfile(savePath, 'loop_averaged_variance_statistics.mat');
 save(loopStatsFile, 'loopStats', '-v7.3');
 if VERBOSE
-    fprintf('\n✓ Saved loop-averaged RMS statistics\n');
+    fprintf('\n✓ Saved loop-averaged variance statistics\n');
 end
 
-%% Calculate overall turbulence intensity
+%% Calculate overall turbulence statistics
 if VERBOSE
-    fprintf('\n=== Computing Turbulence Intensity ===\n');
+    fprintf('\n=== Computing RMS and Turbulence Statistics ===\n');
 end
 
 turbStats = struct();
-turbStats.description = 'Turbulence intensity statistics with quality control';
+turbStats.description = 'Turbulence statistics: variance <u''^2>, RMS sqrt(<u''^2>), with quality control';
 turbStats.n_loops = nLoops;
 turbStats.n_cameras = nCameras;
 turbStats.n_frames = nFrames;
@@ -301,55 +302,92 @@ for cam = 1:nCameras
         fprintf(' Camera %d: ', cam);
     end
     
-    [nRows, nCols] = size(loopStats.u_rms_mean{1, cam});
+    [nRows, nCols] = size(loopStats.u_variance_mean{1, cam});
     
-    u_rms_all_loops = zeros(nRows, nCols, nLoops, 'single');
-    v_rms_all_loops = zeros(nRows, nCols, nLoops, 'single');
+    % Stack variance from all loops
+    u_variance_all_loops = zeros(nRows, nCols, nLoops, 'single');
+    v_variance_all_loops = zeros(nRows, nCols, nLoops, 'single');
     
     for loopNo = 1:nLoops
-        u_rms_all_loops(:, :, loopNo) = loopStats.u_rms_mean{loopNo, cam};
-        v_rms_all_loops(:, :, loopNo) = loopStats.v_rms_mean{loopNo, cam};
+        u_variance_all_loops(:, :, loopNo) = loopStats.u_variance_mean{loopNo, cam};
+        v_variance_all_loops(:, :, loopNo) = loopStats.v_variance_mean{loopNo, cam};
     end
     
-    u_rms_mean = mean(u_rms_all_loops, 3, 'omitnan');
-    v_rms_mean = mean(v_rms_all_loops, 3, 'omitnan');
+    % Mean variance across all loops: <u'^2> in (m/s)^2
+    u_variance_mean = mean(u_variance_all_loops, 3, 'omitnan');
+    v_variance_mean = mean(v_variance_all_loops, 3, 'omitnan');
     
-    u_rms_std = std(u_rms_all_loops, 0, 3, 'omitnan');
-    v_rms_std = std(v_rms_all_loops, 0, 3, 'omitnan');
+    % Standard deviation of variance across loops
+    u_variance_std = std(u_variance_all_loops, 0, 3, 'omitnan');
+    v_variance_std = std(v_variance_all_loops, 0, 3, 'omitnan');
     
-    turbStats.TI_u{cam} = sqrt(u_rms_mean);
-    turbStats.TI_v{cam} = sqrt(v_rms_mean);
+    % RMS (standard deviation of fluctuations): sqrt(<u'^2>) in m/s
+    u_rms = sqrt(u_variance_mean);  % m/s
+    v_rms = sqrt(v_variance_mean);  % m/s
     
-    turbStats.u_rms_std{cam} = u_rms_std;
-    turbStats.v_rms_std{cam} = v_rms_std;
-    turbStats.u_rms_mean_field{cam} = u_rms_mean;
-    turbStats.v_rms_mean_field{cam} = v_rms_mean;
+    % Store variance fields
+    turbStats.u_variance{cam} = u_variance_mean;      % <u'^2> in (m/s)^2
+    turbStats.v_variance{cam} = v_variance_mean;      % <v'^2> in (m/s)^2
+    turbStats.u_variance_std{cam} = u_variance_std;   % Std of variance across loops
+    turbStats.v_variance_std{cam} = v_variance_std;
+    
+    % Store RMS fields
+    turbStats.u_rms{cam} = u_rms;                     % sqrt(<u'^2>) in m/s
+    turbStats.v_rms{cam} = v_rms;                     % sqrt(<v'^2>) in m/s
     
     % Store mean mask for plotting
     turbStats.valid_mask{cam} = meanMask{cam};
     
-    turbStats.TI_u_mean(cam) = mean(turbStats.TI_u{cam}(:), 'omitnan');
-    turbStats.TI_v_mean(cam) = mean(turbStats.TI_v{cam}(:), 'omitnan');
-    turbStats.TI_u_std(cam) = std(turbStats.TI_u{cam}(:), 'omitnan');
-    turbStats.TI_v_std(cam) = std(turbStats.TI_v{cam}(:), 'omitnan');
+    % Calculate spatial-average statistics
+    turbStats.u_variance_mean_scalar(cam) = mean(u_variance_mean(:), 'omitnan');  % Mean variance in (m/s)^2
+    turbStats.v_variance_mean_scalar(cam) = mean(v_variance_mean(:), 'omitnan');
     
-    valid_percent = 100 * sum(~isnan(turbStats.TI_u{cam}(:))) / numel(turbStats.TI_u{cam});
-    ti_max = max(turbStats.TI_u{cam}(:), [], 'omitnan');
+    turbStats.u_rms_mean_scalar(cam) = mean(u_rms(:), 'omitnan');                 % Mean RMS in m/s
+    turbStats.v_rms_mean_scalar(cam) = mean(v_rms(:), 'omitnan');
+    turbStats.u_rms_std_scalar(cam) = std(u_rms(:), 'omitnan');                   % Spatial std of RMS
+    turbStats.v_rms_std_scalar(cam) = std(v_rms(:), 'omitnan');
+    
+    % Data quality metrics
+    valid_percent = 100 * sum(~isnan(u_rms(:))) / numel(u_rms);
+    rms_max = max(u_rms(:), [], 'omitnan');
+    variance_max = max(u_variance_mean(:), [], 'omitnan');
     
     if VERBOSE
-        fprintf('TI_u = %.3f ± %.3f m/s, max = %.2f m/s (%.1f%% valid) ✓\n', ...
-            turbStats.TI_u_mean(cam), turbStats.TI_u_std(cam), ti_max, valid_percent);
+        fprintf('u_rms = %.3f ± %.3f m/s, max = %.2f m/s (%.1f%% valid) ✓\n', ...
+            turbStats.u_rms_mean_scalar(cam), turbStats.u_rms_std_scalar(cam), ...
+            rms_max, valid_percent);
     end
     
-    clear u_rms_all_loops v_rms_all_loops;
+    clear u_variance_all_loops v_variance_all_loops;
 end
 
-turbStatsFile = fullfile(savePath, 'turbulence_intensity_statistics.mat');
+% Save turbulence statistics
+turbStatsFile = fullfile(savePath, 'turbulence_statistics.mat');
 save(turbStatsFile, 'turbStats', '-v7.3');
 
 if VERBOSE
     endTime = toc;
     fprintf('\n✓ Fluctuation analysis completed in %.2f min\n', endTime/60);
+    
+    fprintf('\n=== Summary ===\n');
+    fprintf('Fluctuation files: %d × ~2.58 GB in vel_fluctuations/ folders\n', nLoops);
+    fprintf('Total fluctuation storage: ~%.1f GB\n', 2.58 * nLoops);
+    fprintf('Statistics files: 2 files in root directory\n');
+    fprintf('Peak RAM usage: ~2.6 GB per loop\n');
+    fprintf('\nFile structure:\n');
+    fprintf('  %s\n', savePath);
+    fprintf('  ├── loop=0/vel_fluctuations/fluctuations_all_frames.mat (2.58 GB)\n');
+    fprintf('  ├── loop=1/vel_fluctuations/fluctuations_all_frames.mat (2.58 GB)\n');
+    fprintf('  ├── ...\n');
+    fprintf('  ├── loop_averaged_variance_statistics.mat\n');
+    fprintf('  └── turbulence_statistics.mat\n\n');
+    
+    fprintf('Stored statistics:\n');
+    fprintf('  - u_variance{cam}: Variance <u''^2> field in (m/s)^2\n');
+    fprintf('  - u_rms{cam}: RMS sqrt(<u''^2>) field in m/s\n');
+    fprintf('  - u_rms_mean_scalar: Spatial-average RMS in m/s\n');
+    fprintf('  - u_variance_mean_scalar: Spatial-average variance in (m/s)^2\n\n');
+    fprintf('To compute turbulence intensity: TI = u_variance / U_inf^2\n');
 end
 
 end
