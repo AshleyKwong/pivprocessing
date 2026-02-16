@@ -8,7 +8,7 @@ This repository contains PIV processing scripts for analyzing turbulent boundary
 
 ## Requirements
 
-- MATLAB R20XX or later
+- MATLAB R2024 or later
 - Image Processing Toolbox
 - Signal Analysis Toolbox
 
