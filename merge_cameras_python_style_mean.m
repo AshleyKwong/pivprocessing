@@ -38,7 +38,7 @@ dy = abs(mean(diff(windowCenters.x2_mm{1}(:,1))));
 nx = round((x_max - x_min) / dx) + 1;
 ny = round((y_max - y_min) / dy) + 1;
 x_vec = linspace(x_min, x_max, nx);
-y_vec = linspace(y_max, y_min, ny);  % Descending for image convention
+y_vec = linspace(y_min, y_max, ny);  % Ascending for cartesian coords for image convention
 
 [worldX, worldY] = meshgrid(x_vec, y_vec);
 
