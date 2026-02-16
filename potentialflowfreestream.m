@@ -4,14 +4,16 @@
 
 %% Compare Hanning U_mean with Potential Flow Solution
 % Load potential flow solution (if not already in workspace)
-load('your_potential_flow_file.mat', 'potential_flowsoln');
-
+if ~exist('potential_flowsoln', 'var')
+    load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\BGroup Multielement Vortex Panel Code\panelmethod_velocity_chord_dimensional.mat');
+end 
 % Extract potential flow data
 pf_u = potential_flowsoln.u;      % Potential flow U velocity
 pf_x = potential_flowsoln.x_m;    % X coordinates in meters
 pf_y = potential_flowsoln.y_m;    % Y coordinates in meters
 
-% Extract Hanning mean solution (from your merged data)
+% Extract Hanning mean solution (from your merged data) - need to run piv
+% stitching first. 
 hanning_u = U_hann;          % From your camera merging
 hanning_x = worldX;               % In mm from merging
 hanning_y = worldY;               % In mm from merging
