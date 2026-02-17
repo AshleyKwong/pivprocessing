@@ -9,7 +9,7 @@ set(groot, 'defaultAxesFontSize', 20);
 set(groot, 'defaultTextFontName', 'Cambira Math');
 set(groot, 'defaultTextFontSize', 12);
 set(groot, 'defaultTextColor', 'k');
-set(groot, 'DefaultFigureVisible', 'off');  % Turn off figure visibility globally
+set(groot, 'DefaultFigureVisible', 'on');  % Turn off figure visibility globally
 
 cameraList  = ["Cam1", "Cam2", "Cam3", "Cam4", "Cam5"];  
 savePath = 'E:\Case 6 PIV pivtools Processed\'; % path where data lives and will be saved.
@@ -361,8 +361,8 @@ load(fullfile(savePath, totalLoops(1).name, 'windowCenterCameras_mm.mat'), 'wind
 % [worldX, worldY, U_tukey, ~] = merge_cameras_python_style_median(...
 %     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
 % 
-% [~, ~, U_hann, ~] = merge_cameras_python_style_median(...
-%     windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
+[~, ~, U_hann, ~] = merge_cameras_python_style_median(...
+    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
 % 
 % % Compare
 % figure('Visible', 'on');
@@ -383,7 +383,7 @@ load(fullfile(savePath, totalLoops(1).name, 'windowCenterCameras_mm.mat'), 'wind
 %     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
 
 [worldX, worldY, U_hann_mean, ~] = merge_cameras_python_style_mean(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', [], worldGrid);
+    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
 
 % Compare
 figure('Visible', 'on');
@@ -404,35 +404,104 @@ colormap(jet);
 % profile --> extraction --> plot over HWA
 
 %% turb int
+
 turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, ...
     'Verbose', true,...
-    'ForceRecompute', true,...
+    'ForceRecompute', false,...
     'VelocityThreshold', [-10, 35], ...      % Valid velocity range in m/s
-    'FluctuationThreshold', 50, ...        % Max reasonable fluctuation
+    'FluctuationThreshold', 20, ...        % Max reasonable fluctuation
     'MinValidFraction', 0.7);              % Need 70% valid frames per point
+
 %% visualize turb stats
-[~, ~, U_turbint, ~] = merge_cameras_python_style_mean(...
-    windowCenterCameras_mm, turbStats.TI_u, turbStats.TI_v, masks, 'hann', []);
-% then want to do the freestream
-%%
-load(fullfile(savePath, 'hanning_vs_potential_comparison.mat')); % loads comparison results
-% extract the y values of the mask
-y_potential_flow = comparison_results.y_m; 
-x_potential_flow = comparison_results.x_m; 
-Uinf_potentialthreshold = comparison_results.freestream_mask; 
-ypot_singlearray = y_potential_flow((Uinf_potentialthreshold)); 
-xpot_singlearray = x_potential_flow((Uinf_potentialthreshold)); 
-
-
-%%
+[worldX, worldY, U_turbint, ~] = merge_cameras_python_style_mean(...
+    windowCenterCameras_mm, turbStats.u_rms, turbStats.v_rms, masks, 'hann', []);
 figure(3); 
 hold on; 
-imagesc(worldX(1,:), (worldY(:, 1)), U_turbint./20); 
+imagesc(worldX(1,:), (worldY(:, 1)),U_turbint); 
 set(gca, 'YDir', 'normal');
-colormap(parula(10));clim([ 0 0.5])
-title('$\langle u''^^2\rangle$', 'Interpreter', 'latex'); colorbar;
-% plot(xpot_singlearray.*1000, ypot_singlearray.*1000, "r")
+colormap(parula(10)); clim([0 2])
 axis image;
+%%
+% load(fullfile(savePath, 'hanning_vs_potential_comparison.mat')); % loads comparison results
+% extract the y values of the mask
+
+% Inputs assumed:
+% worldX, worldY          % mm, from merge_cameras_python_style_mean
+% U_turbint               % u_rms (m/s), same grid
+% comparison_results      % from hanningvspotentialcomparison.mat, already on same grid
+% Uhannmean               % mean U field on same grid (for U_inf extraction)
+
+rms_threshold      = 1.5;     % m/s, tune as needed
+rel_err_threshold  = 10;      % %, your potential-flow criterion
+
+% 1) Build combined freestream mask on the PIV grid
+mask_turb   = U_turbint < rms_threshold;
+mask_pot    = comparison_results.relative_error < rel_err_threshold;
+free_mask   = mask_turb & mask_pot;
+
+% Optional: clean up with morphological closing to remove holes
+% free_mask = imclose(free_mask, strel('disk', 2));
+
+[nY, nX] = size(free_mask);
+
+% 2) For each x-column, choose a single y inside the freestream band
+x_line = nan(1, nX);
+y_line = nan(1, nX);
+
+for j = 1:nX
+    col = free_mask(:, j);
+    if ~any(col)
+        continue;  % no freestream at this x
+    end
+
+    % Find contiguous runs of "true" in this column
+    idx_true = find(col);
+    gaps = find(diff(idx_true) > 1);
+
+    % Build start/end indices of contiguous segments
+    seg_start = [idx_true(1); idx_true(gaps+1)];
+    seg_end   = [idx_true(gaps); idx_true(end)];
+
+    % Pick the segment with the largest span in Y
+    [~, k_best] = max(seg_end - seg_start + 1);
+    iy1 = seg_start(k_best);
+    iy2 = seg_end(k_best);
+
+    % Choose representative Y = midpoint of this freestream band
+    iy_mid = round((iy1 + iy2)/2);
+
+    x_line(j) = worldX(iy_mid, j);
+    y_line(j) = worldY(iy_mid, j);
+end
+
+% Remove columns where we found nothing
+valid = ~isnan(x_line) & ~isnan(y_line);
+x_line = x_line(valid);
+y_line = y_line(valid);
+
+% 3) Optional smoothing of the profile (helps avoid jaggedness)
+smooth_span = 9;   % odd number of points
+y_line_smooth = movmean(y_line, smooth_span);
+
+% 4) Extract U_inf along this profile from the mean field
+U_inf_profile = interp2(worldX, worldY, U_hann_mean, x_line, y_line_smooth, 'linear', NaN);
+
+fprintf('Freestream profile: %d points, U_inf = %.3f ± %.3f m/s\n', ...
+    numel(U_inf_profile), mean(U_inf_profile, 'omitnan'), std(U_inf_profile, 'omitnan'));
+
+% 5) Visualise: mask, contour, and selected profile
+figure;
+imagesc(worldX(1,:), worldY(:,1), comparison_results.relative_error);
+set(gca, 'YDir','normal'); axis image; colormap(jet); colorbar; clim([0 20]);
+hold on;
+contour(worldX, worldY, double(free_mask), [0.5 0.5], 'w--', 'LineWidth', 1.5);
+plot(x_line, y_line_smooth, 'r-', 'LineWidth', 2);
+xlabel('X (mm)'); ylabel('Y (mm)');
+title(sprintf('Freestream profile (u_{rms}<%.1f m/s, rel.err<%d%%)', ...
+    rms_threshold, rel_err_threshold));
+legend('Freestream boundary', 'Selected freestream line');
+% figure(); 
+% plot(x_line, movmean(U_inf_profile,100), 'k-', 'LineWidth', 2);
 
 
 %% OPTIONAL: Function to generate correlation GIFs (commented out by default)

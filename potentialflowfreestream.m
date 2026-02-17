@@ -126,7 +126,7 @@ figure(2)
 imagesc(hanning_x_m(1,:), hanning_y_m(:,1), u_relative_error);
 hold on;
 % Overlay freestream contour
-contour(hanning_x_m, hanning_y_m, u_relative_error, [freestream_threshold freestream_threshold], ...
+contour(hanning_x_m, hanning_y_m, u_relative_error, [9 9], ...
     'LineColor', 'r', 'LineWidth', 2);
 axis image; colorbar;
 colormap(jet);
