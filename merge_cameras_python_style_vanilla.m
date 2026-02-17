@@ -38,6 +38,7 @@ dy = abs(me(diff(windowCenters.x2_mm{1}(:,1))));
 % Create unified grid
 x_vec = x_min:dx:x_max;
 y_vec = y_max:-dy:y_min; % Descending for image convention
+% should this change to ascending ?
 
 [worldX, worldY] = meshgrid(x_vec, y_vec);
 

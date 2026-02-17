@@ -14,7 +14,7 @@ pf_y = potential_flowsoln.y_m;    % Y coordinates in meters
 
 % Extract Hanning mean solution (from your merged data) - need to run piv
 % stitching first. 
-hanning_u = U_hann;          % From your camera merging
+hanning_u = U_hann_mean;          % From your camera merging-->
 hanning_x = worldX;               % In mm from merging
 hanning_y = worldY;               % In mm from merging
 

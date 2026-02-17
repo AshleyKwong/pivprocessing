@@ -1,11 +1,18 @@
 %% Compare HWA and PIV - Match Based on Boundary Layer Thickness
 % Load HWA data
-% load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\HWA\TSFP_Abstract\Case 6\xd=2\case6_xd2_bumpprofile_wH_fixedofi.mat'); 
-% loads in as caseData_run2 
+if ~exist('caseData_run2', 'var')
+    load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\HWA\TSFP_Abstract\Case 6\xd=2\case6_xd2_bumpprofile_wH_fixedofi.mat');
+    % loads in as caseData_run2
+end
+
 set(groot, 'defaultFigureVisible', 'remove');
 set(groot, 'defaultFigureVisible', 'on');
 
+%% USER INPUTS
+x_nominal = 1050;  % Nominal HWA measurement location [mm] - USER DEFINED
+threshold = 0.06;  % Matching tolerance (e.g., 0.05 = 5%, 0.08 = 8%)
 
+%% Load HWA data
 HWA_y_delta = caseData_run2.delta_BL;  % in m
 HWA_y = caseData_run2.y_cumulative_corrected; % in m
 HWA_U = caseData_run2.meanvel_corrected; 
@@ -14,10 +21,10 @@ HWA_Uinf = caseData_run2.U_infty_new;
 fprintf('=== HWA Reference Data ===\n');
 fprintf('  U_inf = %.3f m/s\n', HWA_Uinf);
 fprintf('  δ_99 = %.2f mm\n', HWA_y_delta * 1000);
-fprintf('  Location: x = 1050 mm (nominal)\n\n');
+fprintf('  Location: x = %.0f mm (nominal)\n\n', x_nominal);
 
 %% Extract PIV profiles along a range of x-locations
-x_search_range = [900:10:1400];  % Search from 900 to 1400 mm in 10mm steps
+x_search_range = [1000:5:1200];  % Search from 900 to 1400 mm in 10mm steps
 
 fprintf('Extracting %d PIV profiles...\n', length(x_search_range));
 profiles = extractBoundaryLayerProfiles(x_search_range, U_hann_mean, worldX, worldY, ...
@@ -33,7 +40,7 @@ fprintf('✓ Extracted profiles\n');
 fprintf('  Incoming U_inf (PIV) = %.3f m/s\n\n', incoming_Uinf.U_max);
 
 %% Find x-locations and extract delta_99 values
-x_positions = [1050];
+x_positions = [];
 delta_99_array = [];
 
 for i = 1:length(profiles)
@@ -47,7 +54,6 @@ fprintf('Valid profiles: %d / %d\n', length(x_positions), length(profiles));
 
 %% Find matching location based on delta_99
 HWA_delta_mm = HWA_y_delta * 1000;  % Convert to mm
-threshold = 0.08;  % 10% tolerance
 
 % Find PIV profiles within threshold
 delta_error = abs(delta_99_array - HWA_delta_mm) / HWA_delta_mm;
@@ -91,7 +97,7 @@ profile_matched = profiles(profile_idx);
 
 fprintf('\n=== Profile Comparison ===\n');
 fprintf('HWA:\n');
-fprintf('  x = 1050 mm (nominal)\n');
+fprintf('  x = %.0f mm (nominal)\n', x_nominal);
 fprintf('  δ₉₉ = %.2f mm\n', HWA_delta_mm);
 fprintf('  U_inf = %.3f m/s\n', HWA_Uinf);
 
@@ -101,14 +107,14 @@ fprintf('  δ₉₉ = %.2f mm\n', profile_matched.delta_99);
 fprintf('  U_max = %.3f m/s\n', profile_matched.U_max);
 
 fprintf('\nDifferences:\n');
-fprintf('  Δx = %.1f mm\n', profile_matched.x_actual - 1050);
+fprintf('  Δx = %.1f mm\n', profile_matched.x_actual - x_nominal);
 fprintf('  Δδ₉₉ = %.2f mm (%.1f%%)\n', profile_matched.delta_99 - HWA_delta_mm, ...
     100*(profile_matched.delta_99 - HWA_delta_mm)/HWA_delta_mm);
 fprintf('  ΔU_inf = %.3f m/s (%.1f%%)\n', profile_matched.U_max - HWA_Uinf, ...
     100*(profile_matched.U_max - HWA_Uinf)/HWA_Uinf);
 
 %% Visualization
-close all; 
+close all;
 figure('Position', [100, 100, 1800, 1000]);
 
 % FIRST ROW: Boundary Layer Growth, Outer Scaling, Outer Scaling Difference
@@ -137,8 +143,8 @@ grid on;
 subplot(2,3,2);
 % PIV profile
 y_delta_PIV = profile_matched.y ./ profile_matched.delta_99;
-Uinfty_PIV = (0.99*max(profile_matched.U)); 
-U_outer_PIV = profile_matched.U ./ Uinfty_PIV; 
+Uinfty_PIV = (0.99*max(profile_matched.U));
+U_outer_PIV = profile_matched.U ./ Uinfty_PIV;
 
 % HWA profile
 HWA_y_delta_normalized = HWA_y ./ HWA_y_delta;
@@ -150,12 +156,11 @@ plot(y_delta_PIV, U_outer_PIV, "k-o", 'MarkerFaceColor', "k", 'MarkerEdgeColor',
     'DisplayName', sprintf('PIV (x=%.0f mm)', profile_matched.x_actual));
 plot(HWA_y_delta_normalized, HWA_U_normalized, "r-o", 'MarkerFaceColor', "r", ...
     'MarkerEdgeColor', "r", 'LineWidth', 1.5, 'MarkerSize', 4, ...
-    'DisplayName', 'HWA (x=1050 mm)'); 
-
-xlabel('$y/\delta_{99}$', 'Interpreter', 'latex', 'FontSize', 14); 
-ylabel('$U/U_{\infty}$', 'Interpreter', 'latex', 'FontSize', 14); 
+    'DisplayName', sprintf('HWA (x=%.0f mm)', x_nominal));
+xlabel('$y/\delta$', 'Interpreter', 'latex', 'FontSize', 14);
+ylabel('$U/U_{\infty}$', 'Interpreter', 'latex', 'FontSize', 14);
 title('Outer Scaling');
-set(gca, 'XScale', 'log'); 
+set(gca, 'XScale', 'log');
 legend('Location', 'southeast', 'FontSize', 9);
 grid on;
 xlim([0.001, 10]);
@@ -179,15 +184,15 @@ plot(y_delta_PIV(valid_outer_diff), U_outer_diff(valid_outer_diff), 'b-o', ...
 % Add zero reference line
 yline(0, 'k--', 'LineWidth', 1.5, 'DisplayName', 'Zero difference');
 
-% Shade ±threshold% error band (UPDATED DISPLAYNAME)
+% Shade ±threshold% error band
 y_delta_band = logspace(-3, 1, 100);
 outer_band_upper = threshold * ones(size(y_delta_band));
 outer_band_lower = -outer_band_upper;
 fill([y_delta_band, fliplr(y_delta_band)], [outer_band_upper, fliplr(outer_band_lower)], ...
     'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none', ...
-    'DisplayName', sprintf('±%.0f%% band', threshold*100));  % DYNAMIC
+    'DisplayName', sprintf('±%.0f%% band', threshold*100));
 
-xlabel('$y/\delta_{99}$', 'Interpreter', 'latex', 'FontSize', 14);
+xlabel('$y/\delta$', 'Interpreter', 'latex', 'FontSize', 14);
 ylabel('$\Delta(U/U_{\infty})$', 'Interpreter', 'latex', 'FontSize', 14);
 title('Difference in Outer Scaling');
 legend('Location', 'best', 'FontSize', 9);
@@ -206,51 +211,46 @@ if any(outer_region)
         'VerticalAlignment', 'top', 'BackgroundColor', 'w', 'EdgeColor', 'k');
 end
 
-
 % SECOND ROW: Inner Scaling, Inner Scaling Difference, Velocity Field
-nidaq_cond = load("F:\LAB7 COMPUTER\AK PIV NIDAQ\AK_PIV_NIDaq\U20_y235_aoan11_aoafn11.mat");
-Uinf = sqrt(nidaq_cond.qu*2*caseData_run2.rho_air); 
-
 
 % Get inner scaling variables
-ofi_casedata = load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\OFI\PLOTTING\case6cf.mat'); 
-Cf_ofi =  interp1(ofi_casedata.case2cfdata.("sorted global x mm"), ofi_casedata.case2cfdata.("Cf Avg window 16"), 8250); 
-% Cf ofi is acc with the upstream pitot tube from OFI need to change to be
-% the freestream.
-q_1 = check.qu; 
-P1 = check.P0 / 1013; 
-T1 = check.T_plc; 
+nidaq_cond = load("F:\LAB7 COMPUTER\AK PIV NIDAQ\AK_PIV_NIDaq\U20_y235_aoan11_aoafn11.mat");
+Uinf = sqrt(nidaq_cond.qu*2*caseData_run2.rho_air);
 
-q_2 = check2.qu; 
-P2 = check2.P0 / 1013; 
-T2 = check2.T_plc; 
+ofi_casedata = load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\OFI\PLOTTING\case6cf.mat');
+Cf_ofi = interp1(ofi_casedata.case2cfdata.("sorted global x mm"), ofi_casedata.case2cfdata.("Cf Avg window 16"), 8250);
 
-[rho_air_1, visc_air_1] = fluid_prop(T1, P1); % reports air in kg/  m3
-[rho_air_2, visc_air_2] = fluid_prop(T2, P2); % reports air in kg/  m3
+q_1 = check.qu;
+P1 = check.P0 / 1013;
+T1 = check.T_plc;
+q_2 = check2.qu;
+P2 = check2.P0 / 1013;
+T2 = check2.T_plc;
 
-U1 = sqrt(2*q_1/rho_air_1); 
-U2 = sqrt(2*q_2/rho_air_2); 
+[rho_air_1, visc_air_1] = fluid_prop(T1, P1);
+[rho_air_2, visc_air_2] = fluid_prop(T2, P2);
 
-Uinf_pitot = mean([U1 U2]); 
-Cf_ofi_corrected = Cf_ofi*(Uinf_pitot/ Uinfty_PIV)^2; 
+U1 = sqrt(2*q_1/rho_air_1);
+U2 = sqrt(2*q_2/rho_air_2);
+Uinf_pitot = mean([U1 U2]);
 
-Cf_musker = 2*utau_musker^2 / (HWA_Uinf^2); % this is w the local Uinf. 
+Cf_ofi_corrected = Cf_ofi*(Uinf_pitot/ Uinfty_PIV)^2;
+
+utau_musker = caseData_run2.utau_musker;
+Cf_musker = 2*utau_musker^2 / (HWA_Uinf^2);
+
 fprintf("\tThe error bw Cf_musker and Cf_ofi = %.2f %% \n", (abs(Cf_musker - Cf_ofi_corrected)/ Cf_ofi_corrected)*100 )
 
 utau_piv = sqrt(Cf_musker*Uinfty_PIV^2*0.5);
-% use the Cf_ofi_correct for the local measurement.
-
-utau_musker = caseData_run2.utau_musker; 
-kin_vis = caseData_run2.nu_air; 
-
+kin_vis = caseData_run2.nu_air;
 
 % Calculate inner scaling coordinates
-y_inner_m = (profile_matched.y./1000); 
-y_inner_piv = (y_inner_m) .* utau_piv ./ kin_vis; 
-U_inner_PIV = profile_matched.U ./ utau_piv; 
+y_inner_m = (profile_matched.y./1000);
+y_inner_piv = (y_inner_m) .* utau_piv ./ kin_vis;
+U_inner_PIV = profile_matched.U ./ utau_piv;
 
-HWA_y_inner_normalized = (HWA_y .* utau_musker) ./ kin_vis; 
-HWA_U_inner_normalized = HWA_U ./ utau_musker; 
+HWA_y_inner_normalized = (HWA_y .* utau_musker) ./ kin_vis;
+HWA_U_inner_normalized = HWA_U ./ utau_musker;
 
 % Subplot 4: Inner scaling
 subplot(2,3,4);
@@ -262,26 +262,26 @@ plot(y_inner_piv, U_inner_PIV, "k-o", 'MarkerFaceColor', "k", 'MarkerEdgeColor',
     'DisplayName', sprintf('PIV (x=%.0f mm)', profile_matched.x_actual));
 plot(HWA_y_inner_normalized, HWA_U_inner_normalized, "r-o", 'MarkerFaceColor', "r", ...
     'MarkerEdgeColor', "r", 'LineWidth', 1.5, 'MarkerSize', 4, ...
-    'DisplayName', 'HWA (x=1050 mm)');
+    'DisplayName', sprintf('HWA (x=%.0f mm)', x_nominal));
 
 % Add log-law and viscous sublayer references
 y_plus_ref = logspace(0, 4, 100);
-U_plus_viscous = y_plus_ref;  % u+ = y+ (viscous sublayer)
-U_plus_log = (1/0.41) * log(y_plus_ref) + 5.0;  % Log law: u+ = (1/κ)ln(y+) + B
+U_plus_viscous = y_plus_ref;
+U_plus_log = (1/0.41) * log(y_plus_ref) + 5.0;
 
 plot(y_plus_ref, U_plus_viscous, 'b--', 'LineWidth', 1, 'DisplayName', 'u^+ = y^+');
 plot(y_plus_ref, U_plus_log, 'g--', 'LineWidth', 1, 'DisplayName', 'Log law');
 
-xlabel('$y^+$', 'Interpreter', 'latex', 'FontSize', 14); 
-ylabel('$U^+$', 'Interpreter', 'latex', 'FontSize', 14); 
+xlabel('$y^+$', 'Interpreter', 'latex', 'FontSize', 14);
+ylabel('$U^+$', 'Interpreter', 'latex', 'FontSize', 14);
 title(sprintf('Inner Scaling (u_\\tau = %.3f m/s)', utau_musker));
 legend('Location', 'southeast', 'FontSize', 9);
 grid on;
-set(gca, 'XScale', 'log'); 
+set(gca, 'XScale', 'log');
 xlim([1, 15000]);
 ylim([0, 35]);
 
-% Subplot 5: INNER SCALING DIFFERENCE 
+% Subplot 5: INNER SCALING DIFFERENCE
 subplot(2,3,5);
 hold on;
 
@@ -299,13 +299,13 @@ plot(y_inner_piv(valid_diff), U_diff(valid_diff), 'b-o', 'LineWidth', 2, 'Marker
 % Add zero reference line
 yline(0, 'k--', 'LineWidth', 1.5, 'DisplayName', 'Zero difference');
 
-% Shade ±threshold% error band (UPDATED DISPLAYNAME)
+% Shade ±threshold% error band
 y_plus_band = logspace(0, 4, 100);
 U_plus_band_upper = threshold * ((1/0.41) * log(y_plus_band) + 5.0);
 U_plus_band_lower = -U_plus_band_upper;
 fill([y_plus_band, fliplr(y_plus_band)], [U_plus_band_upper, fliplr(U_plus_band_lower)], ...
     'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none', ...
-    'DisplayName', sprintf('±%.0f%% band', threshold*100));  % DYNAMIC
+    'DisplayName', sprintf('±%.0f%% band', threshold*100));
 
 xlabel('$y^+$', 'Interpreter', 'latex', 'FontSize', 14);
 ylabel('$\Delta U^+ = U^+_{PIV} - U^+_{HWA}$', 'Interpreter', 'latex', 'FontSize', 14);
@@ -326,7 +326,6 @@ if any(overlap_region)
         'VerticalAlignment', 'top', 'BackgroundColor', 'w', 'EdgeColor', 'k');
 end
 
-
 % Subplot 6: PIV Velocity field with profile location
 subplot(2,3,6);
 imagesc(worldX(1,:), worldY(:,1), U_hann_mean);
@@ -336,23 +335,29 @@ colorbar;
 colormap(gca, jet);
 hold on;
 
-% Mark the matched profile location
-xline(x_suggested, 'k--', 'LineWidth', 3, 'DisplayName', sprintf('x=%.0f mm', x_suggested));
-yline(profile_matched.delta_99, 'r--', 'LineWidth', 2, ...
-    'DisplayName', sprintf('δ₉₉=%.1f mm', profile_matched.delta_99));
+% Mark the matched PIV profile location
+xline(x_suggested, 'k--', 'LineWidth', 2, ...
+    'DisplayName', sprintf('PIV x=%.0f mm', x_suggested));
+yline(profile_matched.delta_99, 'k--', 'LineWidth', 2, ...
+    'DisplayName', sprintf('δ₉₉=%.3f mm', profile_matched.delta_99));
 
-% Mark the nominal HWA location for comparison
-xline(1050, 'r:', 'LineWidth', 2, 'DisplayName', 'HWA x=1050 mm');
-
+% Mark ONLY the nominal HWA location (user-defined)
+% xline(x_nominal, 'k--', 'LineWidth', 3, ...
+%     'DisplayName', sprintf('HWA x=%.0f mm', x_nominal));
+ax = gca; 
+ax.FontSize = 12; 
 xlabel('X [mm]');
 ylabel('Y [mm]');
 title('PIV Velocity Field with Profile Locations');
 legend('Location', 'northeast', 'FontSize', 9);
-clim([0, 25]);  % Adjust colorbar limits as needed
+clim([0, 25]);
 
-sgtitle(sprintf('PIV-HWA Comparison: δ₉₉ Matching (PIV x=%.0f mm, HWA x=1050 mm)', x_suggested), ...
-    'FontSize', 16, 'FontWeight', 'bold');
+sgtitle(sprintf('PIV-HWA Comparison: δ₉₉ Matching (PIV x=%.0f mm, HWA x=%.0f mm)', ...
+    x_suggested, x_nominal), 'FontSize', 16, 'FontWeight', 'bold');
+%% 
+figure(); 
 
+%% Print summary statistics
 fprintf('\n=== Difference Statistics ===\n');
 
 % OUTER SCALING ANALYSIS
@@ -362,16 +367,16 @@ if any(outer_region)
     fprintf('  RMS difference: %.4f\n', rms_outer);
     fprintf('  Relative error: %.1f%%\n', 100*rms_outer);
     
-    % Find last point within threshold % in outer scaling (UPDATED MESSAGE)
+    % Find last point within threshold % in outer scaling
     within_threshold_outer = abs(U_outer_diff) <= threshold & valid_outer_diff;
     if any(within_threshold_outer)
         last_idx_outer = find(within_threshold_outer, 1, 'last');
         y_last_outer_normalized = y_delta_PIV(last_idx_outer);
         y_last_outer_mm = profile_matched.y(last_idx_outer);
         fprintf('  Last point within ±%.0f%%: y/δ = %.4f (y = %.2f mm)\n', ...
-            threshold*100, y_last_outer_normalized, y_last_outer_mm);  % DYNAMIC
+            threshold*100, y_last_outer_normalized, y_last_outer_mm);
     else
-        fprintf('  ⚠ No points within ±%.0f%%\n', threshold*100);  % DYNAMIC
+        fprintf('  ⚠ No points within ±%.0f%%\n', threshold*100);
     end
 end
 
@@ -382,7 +387,7 @@ if any(overlap_region)
     fprintf('  RMS difference: %.2f U+\n', rms_diff);
     fprintf('  Relative error: %.1f%% (based on U+ ~ 15)\n', 100*rms_diff/15);
     
-    % Find last point within threshold% in inner scaling (UPDATED MESSAGE)
+    % Find last point within threshold% in inner scaling
     U_plus_reference = (1/0.41) * log(y_inner_piv) + 5.0;
     error_threshold_inner = threshold * U_plus_reference;
     
@@ -392,9 +397,9 @@ if any(overlap_region)
         y_last_inner_plus = y_inner_piv(last_idx_inner);
         y_last_inner_mm = profile_matched.y(last_idx_inner);
         fprintf('  Last point within ±%.0f%%: y+ = %.1f (y = %.2f mm)\n', ...
-            threshold*100, y_last_inner_plus, y_last_inner_mm);  % DYNAMIC
+            threshold*100, y_last_inner_plus, y_last_inner_mm);
     else
-        fprintf('  ⚠ No points within ±%.0f%%\n', threshold*100);  % DYNAMIC
+        fprintf('  ⚠ No points within ±%.0f%%\n', threshold*100);
     end
 end
 
@@ -402,31 +407,31 @@ end
 fprintf('\n=== Summary Table ===\n');
 fprintf('%-20s %12s %12s %12s\n', 'Parameter', 'HWA', 'PIV', 'Difference');
 fprintf('%s\n', repmat('-', 1, 60));
-fprintf('%-20s %12.1f %12.1f %12.1f\n', 'x-location [mm]', 1050, profile_matched.x_actual, profile_matched.x_actual - 1050);
+fprintf('%-20s %12.1f %12.1f %12.1f\n', 'x-location [mm]', x_nominal, profile_matched.x_actual, profile_matched.x_actual - x_nominal);
 fprintf('%-20s %12.2f %12.2f %12.2f\n', 'δ₉₉ [mm]', HWA_delta_mm, profile_matched.delta_99, profile_matched.delta_99 - HWA_delta_mm);
 fprintf('%-20s %12.3f %12.3f %12.3f\n', 'U_inf [m/s]', HWA_Uinf, profile_matched.U_max, profile_matched.U_max - HWA_Uinf);
 fprintf('%-20s %12s %12.2f %12s\n', 'Error in δ₉₉ [%]', '-', 100*delta_error(profile_idx), '-');
 
-% Add agreement quality section (UPDATED MESSAGES)
-fprintf('\n=== Agreement Quality (±%.0f%% threshold) ===\n', threshold*100);  % DYNAMIC
+% Add agreement quality section
+fprintf('\n=== Agreement Quality (±%.0f%% threshold) ===\n', threshold*100);
 if exist('y_last_outer_normalized', 'var')
     fprintf('Outer scaling: Agreement within ±%.0f%% from y/δ = %.4f (%.2f mm)\n', ...
-        threshold*100, y_last_outer_normalized, y_last_outer_mm);  % DYNAMIC
+        threshold*100, y_last_outer_normalized, y_last_outer_mm);
 else
-    fprintf('Outer scaling: No agreement within ±%.0f%%\n', threshold*100);  % DYNAMIC
+    fprintf('Outer scaling: No agreement within ±%.0f%%\n', threshold*100);
 end
 
 if exist('y_last_inner_plus', 'var')
     fprintf('Inner scaling: Agreement within ±%.0f%% from y+ = %.1f (%.2f mm)\n', ...
-        threshold*100, y_last_inner_plus, y_last_inner_mm);  % DYNAMIC
+        threshold*100, y_last_inner_plus, y_last_inner_mm);
 else
-    fprintf('Inner scaling: No agreement within ±%.0f%%\n', threshold*100);  % DYNAMIC
+    fprintf('Inner scaling: No agreement within ±%.0f%%\n', threshold*100);
 end
 
 %% Save matching data
 matching_data = struct();
 matching_data.method = 'delta_99_matching';
-matching_data.x_HWA = 1050;
+matching_data.x_HWA_nominal = x_nominal;
 matching_data.x_PIV = profile_matched.x_actual;
 matching_data.delta_HWA = HWA_delta_mm;
 matching_data.delta_PIV = profile_matched.delta_99;

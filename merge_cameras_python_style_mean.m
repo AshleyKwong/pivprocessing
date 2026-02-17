@@ -1,5 +1,5 @@
 function [worldX, worldY, U_merged, V_merged] = merge_cameras_python_style_mean(...
-    windowCenters, velocityU, velocityV, masks, window_type, taper_param)
+    windowCenters, velocityU, velocityV, masks, window_type, taper_param, worldGrid)
 % MERGE_CAMERAS_PYTHON_STYLE Merge multi-camera PIV using Python-style blending
 %
 % Inputs:
@@ -18,32 +18,40 @@ if nargin < 5, window_type = 'tukey'; end
 if nargin < 6, taper_param = 0.5; end
 
 nCams = numel(velocityU);
-
 %% STEP 1: Create unified grid from all camera bounds
-x_min = inf; x_max = -inf;
-y_min = inf; y_max = -inf;
+% Add optional worldGrid parameter
+if nargin < 7 || isempty(worldGrid)
+    x_min = inf; x_max = -inf;
+    y_min = inf; y_max = -inf;
 
-for cam = 1:nCams
-    x_min = min(x_min, min(windowCenters.x1_mm{cam}(:)));
-    x_max = max(x_max, max(windowCenters.x1_mm{cam}(:)));
-    y_min = min(y_min, min(windowCenters.x2_mm{cam}(:)));
-    y_max = max(y_max, max(windowCenters.x2_mm{cam}(:)));
+    for cam = 1:nCams
+        x_min = min(x_min, min(windowCenters.x1_mm{cam}(:)));
+        x_max = max(x_max, max(windowCenters.x1_mm{cam}(:)));
+        y_min = min(y_min, min(windowCenters.x2_mm{cam}(:)));
+        y_max = max(y_max, max(windowCenters.x2_mm{cam}(:)));
+    end
+
+    % Get grid spacing from first camera
+    dx = abs(mean(diff(windowCenters.x1_mm{1}(1,:))));
+    dy = abs(mean(diff(windowCenters.x2_mm{1}(:,1))));
+
+    % Create unified grid with UNIFORM SPACING using linspace (matches Python)
+    nx = round((x_max - x_min) / dx) + 1;
+    ny = round((y_max - y_min) / dy) + 1;
+    x_vec = linspace(x_min, x_max, nx);
+    y_vec = linspace(y_min, y_max, ny);  % Ascending for cartesian coords for image convention
+
+    [worldX, worldY] = meshgrid(x_vec, y_vec);
+
+    fprintf('Unified grid: %d x %d, X:[%.1f, %.1f], Y:[%.1f, %.1f]\n', ...
+        size(worldX,2), size(worldX,1), x_min, x_max, y_min, y_max);
+
+else
+    % Use provided grid
+    worldX = worldGrid.x1;
+    worldY = worldGrid.x2;
+    fprintf('Using provided world grid: %d x %d\n', size(worldX,2), size(worldX,1));
 end
-
-% Get grid spacing from first camera
-dx = abs(mean(diff(windowCenters.x1_mm{1}(1,:))));
-dy = abs(mean(diff(windowCenters.x2_mm{1}(:,1))));
-
-% Create unified grid with UNIFORM SPACING using linspace (matches Python)
-nx = round((x_max - x_min) / dx) + 1;
-ny = round((y_max - y_min) / dy) + 1;
-x_vec = linspace(x_min, x_max, nx);
-y_vec = linspace(y_min, y_max, ny);  % Ascending for cartesian coords for image convention
-
-[worldX, worldY] = meshgrid(x_vec, y_vec);
-
-fprintf('Unified grid: %d x %d, X:[%.1f, %.1f], Y:[%.1f, %.1f]\n', ...
-    size(worldX,2), size(worldX,1), x_min, x_max, y_min, y_max);
 
 %% STEP 2: Interpolate all cameras to unified grid
 camera_interp = cell(1, nCams);

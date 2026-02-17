@@ -8,6 +8,7 @@ set(groot, 'defaultAxesFontName', 'Cambria Math');
 set(groot, 'defaultAxesFontSize', 20);
 set(groot, 'defaultTextFontName', 'Cambira Math');
 set(groot, 'defaultTextFontSize', 12);
+set(groot, 'defaultTextColor', 'k');
 set(groot, 'DefaultFigureVisible', 'off');  % Turn off figure visibility globally
 
 cameraList  = ["Cam1", "Cam2", "Cam3", "Cam4", "Cam5"];  
@@ -54,6 +55,12 @@ dx2 = mean_del_x1*windowsize(1)*(1-overlap_percentage/100);
 worldx1 = (single(worldx1));
 worldx2= single(worldx2);
 
+
+worldGrid = struct();
+worldGrid.x1 = worldx1;
+worldGrid.x2 = worldx2;
+worldGrid.dx1 = dx1;
+worldGrid.dx2 = dx2;
 %% MAIN PROCESSING LOOP
 % Get all directories and filter for "loop=XX" format only
 d = dir(savePath); 
@@ -351,47 +358,82 @@ addpath(genpath('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Exp
 % Load physical locations for merging (from first loop folder)
 load(fullfile(savePath, totalLoops(1).name, 'windowCenterCameras_mm.mat'), 'windowCenterCameras_mm');
 
-[worldX, worldY, U_tukey, ~] = merge_cameras_python_style_median(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
-
-[~, ~, U_hann, ~] = merge_cameras_python_style_median(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
-
-% Compare
-figure('Visible', 'on');
-subplot(2,1,1); 
-imagesc(worldX(1,:), flipud(worldY(:, 1)), U_tukey); 
-title('Tukey'); colorbar; colormap(jet); 
-axis image;
-
-subplot(2,1,2); 
-imagesc(worldX(1,:), flipud(worldY(:, 1)), U_hann); 
-title('Hann'); colorbar;colormap(jet); 
-axis image;
-
-sgtitle("Median Merging: Tukey vs Hann");
-
+% [worldX, worldY, U_tukey, ~] = merge_cameras_python_style_median(...
+%     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
+% 
+% [~, ~, U_hann, ~] = merge_cameras_python_style_median(...
+%     windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
+% 
+% % Compare
+% figure('Visible', 'on');
+% subplot(2,1,1); 
+% imagesc(worldX(1,:), flipud(worldY(:, 1)), U_tukey); 
+% title('Tukey'); colorbar; colormap(jet); 
+% axis image;
+% 
+% subplot(2,1,2); 
+% imagesc(worldX(1,:), flipud(worldY(:, 1)), U_hann); 
+% title('Hann'); colorbar;colormap(jet); 
+% axis image;
+% 
+% sgtitle("Median Merging: Tukey vs Hann");
+% 
 %% CAMERA MERGING - Mean with Tukey window
-[worldX, worldY, U_tukey_mean, ~] = merge_cameras_python_style_mean(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
+% [worldX, worldY, U_tukey_mean, ~] = merge_cameras_python_style_mean(...
+%     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
 
-[~, ~, U_hann_mean, ~] = merge_cameras_python_style_mean(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
+[worldX, worldY, U_hann_mean, ~] = merge_cameras_python_style_mean(...
+    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', [], worldGrid);
 
 % Compare
 figure('Visible', 'on');
-subplot(2,1,1); 
-imagesc(worldX(1,:), flipud(worldY(:, 1)), U_tukey_mean); 
-title('Tukey'); colorbar;
-axis image;
-
-subplot(2,1,2); 
-imagesc(worldX(1,:), flipud(worldY(:, 1)), U_hann_mean); 
+% subplot(2,1,1); 
+% imagesc(worldX(1,:), (worldY(:, 1)), U_tukey_mean); 
+% set(gca, 'YDir', 'normal');
+% 
+% title('Tukey'); colorbar;
+% axis image;
+% 
+% subplot(2,1,2); 
+imagesc(worldX(1,:), (worldY(:, 1)), U_hann_mean); % no need to flip - just set ydir as normal.
 title('Hann'); colorbar;
 axis image;
+set(gca, 'YDir', 'normal');
+colormap(jet);
+% sgtitle("Mean Merging: Tukey vs Hann");
+% profile --> extraction --> plot over HWA
 
-colormap(parula);
-sgtitle("Mean Merging: Tukey vs Hann");
+%% turb int
+turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, ...
+    'Verbose', true,...
+    'ForceRecompute', true,...
+    'VelocityThreshold', [-10, 35], ...      % Valid velocity range in m/s
+    'FluctuationThreshold', 50, ...        % Max reasonable fluctuation
+    'MinValidFraction', 0.7);              % Need 70% valid frames per point
+%% visualize turb stats
+[~, ~, U_turbint, ~] = merge_cameras_python_style_mean(...
+    windowCenterCameras_mm, turbStats.TI_u, turbStats.TI_v, masks, 'hann', []);
+% then want to do the freestream
+%%
+load(fullfile(savePath, 'hanning_vs_potential_comparison.mat')); % loads comparison results
+% extract the y values of the mask
+y_potential_flow = comparison_results.y_m; 
+x_potential_flow = comparison_results.x_m; 
+Uinf_potentialthreshold = comparison_results.freestream_mask; 
+ypot_singlearray = y_potential_flow((Uinf_potentialthreshold)); 
+xpot_singlearray = x_potential_flow((Uinf_potentialthreshold)); 
+
+
+%%
+figure(3); 
+hold on; 
+imagesc(worldX(1,:), (worldY(:, 1)), U_turbint./20); 
+set(gca, 'YDir', 'normal');
+colormap(parula(10));clim([ 0 0.5])
+title('$\langle u''^^2\rangle$', 'Interpreter', 'latex'); colorbar;
+% plot(xpot_singlearray.*1000, ypot_singlearray.*1000, "r")
+axis image;
+
 
 %% OPTIONAL: Function to generate correlation GIFs (commented out by default)
 function generateCorrelationGifs(saveFolder, cameraList, final_pass_index)
