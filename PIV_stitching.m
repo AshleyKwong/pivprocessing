@@ -9,8 +9,6 @@ set(groot, 'defaultAxesFontSize', 20);
 set(groot, 'defaultTextFontName', 'Cambira Math');
 set(groot, 'defaultTextFontSize', 12);
 set(groot, 'defaultTextColor', 'k');
-set(groot, 'DefaultFigureVisible', 'on');  % Turn off figure visibility globally
-
 cameraList  = ["Cam1", "Cam2", "Cam3", "Cam4", "Cam5"];  
 savePath = 'E:\Case 6 PIV pivtools Processed\'; % path where data lives and will be saved.
 
