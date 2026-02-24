@@ -8,6 +8,7 @@ y250_aoan04_aoafn04piv/
 y250_aoan04_aoafn04pivrepeat/
 y250_aoan04_aoafn06piv/
 calib_tools/
+pivtools_mean_UV_allcams.mat
 
 # Individual scripts to exclude
 piv_precheck.m

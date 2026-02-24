@@ -32,8 +32,17 @@ if nargin < 7 || isempty(worldGrid)
     end
 
     % Get grid spacing from first camera
-    dx = abs(mean(diff(windowCenters.x1_mm{1}(1,:))));
-    dy = abs(mean(diff(windowCenters.x2_mm{1}(:,1))));
+    % dx = abs(mean(diff(windowCenters.x1_mm{1}(1,:))));
+    % dy = abs(mean(diff(windowCenters.x2_mm{1}(:,1))));
+    dx_all = zeros(1, nCams);
+    dy_all = zeros(1, nCams);
+    for cam = 1:nCams
+        dx_all(cam) = abs(mean(diff(windowCenters.x1_mm{cam}(1,:))));
+        dy_all(cam) = abs(mean(diff(windowCenters.x2_mm{cam}(:,1))));
+    end
+    dx = mean(dx_all);
+    dy = mean(dy_all);
+
 
     % Create unified grid with UNIFORM SPACING using linspace (matches Python)
     nx = round((x_max - x_min) / dx) + 1;

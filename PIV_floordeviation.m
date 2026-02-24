@@ -6,7 +6,7 @@
 
 pt_x = pivData.coordinates(final_pass_index).x;
 pt_y = pivData.coordinates(final_pass_index).y;
-U_pt = single(ptMeanU_sub);
+U_pt = single(pivtools_mean_U);
 
 x_vec_pt = pt_x(1,:);
 y_vec    = pt_y(:,1);
@@ -210,8 +210,3 @@ xlim([0 1400]);
 
 linkaxes([ax1, ax2], 'x');
 sgtitle('Wall location and pitch: Method A vs Method C', 'FontSize', 14);
-
-% --- 8. Cleanup ----------------------------------------------------------
-clear U_band band_rows band_mask y_band;
-clear floor_y_A floor_y_C valid_A valid_C resid_A resid_C;
-clear p_A p_C pitch_A_mm pitch_A_deg pitch_C_mm pitch_C_deg;
