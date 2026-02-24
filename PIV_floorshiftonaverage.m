@@ -154,7 +154,7 @@ end % end of cam
 %-------------------------------------------------------------------------
 %% loading the floor
 close all;
-mean_pivtools = load('C:\Users\ak1u24\Downloads\pivtools_mean_UV_allcams.mat'); 
+mean_pivtools = load('pivtools_mean_UV_allcams.mat'); 
 coords_per_cam = mean_pivtools.coords_per_cam; 
 mean_U_per_cam = mean_pivtools.mean_U_per_cam; 
 
@@ -165,10 +165,10 @@ coords_per_cam_corrected = struct();
 coords_per_cam_corrected.x1_mm = cell(1, numel(cameraList));
 coords_per_cam_corrected.x2_mm = cell(1, numel(cameraList));
 cam_y_bands = [ ...
-   -12,  -10;   % Cam1
-   -6,  -3;   % Cam2
-   -14,  -10;   % Cam3
-   -21,  -16;   % Cam4
+   -15,  -10;   % Cam1
+   -7,  10;   % Cam2
+   -16,  10;   % Cam3
+   -21,  10;   % Cam4
    -0.5,  10 ]; % Cam5
 for cameraNo = 1:numel(cameraList)
     x_vec_pt = coords_per_cam{cameraNo}.x(1, :);

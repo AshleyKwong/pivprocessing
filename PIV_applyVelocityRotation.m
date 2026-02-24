@@ -1,42 +1,13 @@
 function PIV_applyVelocityRotation(camInstDir, p_C, opts)
 % PIV_applyVelocityRotation  Rotate PIV velocity vectors into the floor-aligned frame.
-%
-%   PIV_applyVelocityRotation(camInstDir, p_C)
-%   PIV_applyVelocityRotation(camInstDir, p_C, BackupOld=true)
-%
-%   Inputs
-%   ------
-%   camInstDir : char | string
-%       Full path to the 'instantaneous' subfolder for one camera, e.g.:
-%       'E:\ProcessedPIV_case2fullpipe\loop=05\calibrated_piv\150\Cam1\instantaneous'
-%
-%   p_C        : 1x2 double
-%       Linear floor-fit coefficients [slope, intercept] from PIV_detectFloor.
-%       The rotation angle is derived as theta = atan(p_C(1)).
-%
-%   Options (name-value)
-%   --------------------
-%   BackupOld  : logical, default false
-%       If true, saves each original file as 00001_old.mat etc. before
-%       overwriting. WARNING: this doubles disk usage — only use on a
-%       small subset to verify the rotation is correct first.
-%
-%   What it does
-%   ------------
-%   For every 000XX.mat file in camInstDir:
-%     1. Loads piv_result  (1x3 cell array)
-%     2. Rotates piv_result{end}.ux and piv_result{end}.uy by -theta
-%        (transforms from tilted lab frame into floor-parallel / wall-normal frame)
-%     3. Leaves piv_result{1}, piv_result{2}, and b_mask untouched
-%     4. Overwrites the original .mat file with the modified piv_result
-%
-%   Rotation applied (same theta for all frames — it is a property of the rig):
-%       U_rot =  U*cos(theta) + V*sin(theta)
-%       V_rot = -U*sin(theta) + V*cos(theta)
+%   Key changes vs v1:
+%     - parfor over files (uses all allocated SLURM cores)
+%     - '-v7' instead of '-v7.3' (no HDF5 overhead for small arrays)
+%     - arithmetic kept in single (no double upcast needed)
 
     arguments
-        camInstDir  (1,1) string
-        p_C         (1,2) double
+        camInstDir     (1,1) string
+        p_C            (1,2) double
         opts.BackupOld (1,1) logical = false
     end
 
@@ -48,20 +19,21 @@ function PIV_applyVelocityRotation(camInstDir, p_C, opts)
     end
 
     % ------------------------------------------------------------------
-    %  1.  Derive rotation angle from floor fit slope
+    %  1.  Rotation constants  (broadcast into parfor workers)
     % ------------------------------------------------------------------
-    theta = atan(p_C(1));   % radians; same for every frame in this camera
+    theta = atan(p_C(1));
+    cosT  = single(cos(theta));     % single: matches ux/uy dtype, avoids upcast
+    sinT  = single(sin(theta));
+    doBackup = opts.BackupOld;      % extract struct field — parfor requires plain vars
+
     fprintf('Camera folder : %s\n', camInstDir);
     fprintf('Floor slope   : %.6f  →  theta = %.6f rad (%.5f deg)\n', ...
             p_C(1), theta, rad2deg(theta));
 
-    cosT =  cos(theta);
-    sinT =  sin(theta);
-
     % ------------------------------------------------------------------
-    %  2.  Discover all frame files (exclude coordinates*.mat)
+    %  2.  Discover frame files
     % ------------------------------------------------------------------
-    allFiles  = dir(fullfile(camInstDir, '*.mat'));
+    allFiles   = dir(fullfile(camInstDir, '*.mat'));
     frameFiles = allFiles(~contains({allFiles.name}, 'coordinates'));
 
     if isempty(frameFiles)
@@ -70,49 +42,38 @@ function PIV_applyVelocityRotation(camInstDir, p_C, opts)
         return
     end
 
-    fprintf('Found %d frame files. Rotating...\n', numel(frameFiles));
+    nFiles    = numel(frameFiles);
+    filePaths = fullfile({frameFiles.folder}, {frameFiles.name})';  % cell col-vec
+    fprintf('Found %d frame files. Rotating (parfor)...\n', nFiles);
 
     % ------------------------------------------------------------------
-    %  3.  Loop over frames
+    %  3.  Parallel loop — each file is fully independent
     % ------------------------------------------------------------------
-    for k = 1:numel(frameFiles)
+    parfor k = 1:nFiles
 
-        fPath = fullfile(frameFiles(k).folder, frameFiles(k).name);
-
-        % Load
+        fPath      = filePaths{k};
         loaded     = load(fPath, 'piv_result');
-        piv_result = loaded.piv_result;   %#ok<NASGU> — will be modified below
+        piv_result = loaded.piv_result;   %#ok<PFBNS>
 
-        % Extract U and V from the last cell (index 3 = end)
-        U = double(piv_result{end}.ux);
-        V = double(piv_result{end}.uy);
-
-        % Rotate
-        U_rot =  cosT .* U + sinT .* V;
-        V_rot = -sinT .* U + cosT .* V;
-
-        % Write back (preserve original numeric class)
-        piv_result{end}.ux = cast(U_rot, class(piv_result{end}.ux));
-        piv_result{end}.uy = cast(V_rot, class(piv_result{end}.uy));
-
-        % Optional backup
-        if opts.BackupOld
-            [~, fname, ext] = fileparts(fPath);
-            backupPath = fullfile(frameFiles(k).folder, [fname '_old' ext]);
-            loaded_orig = load(fPath, 'piv_result'); %#ok — re-read before overwrite
-            piv_result_orig = loaded_orig.piv_result;
-            save(backupPath, 'piv_result_orig', '-v7.3');
+        % Optional backup — done before any modification
+        if doBackup
+            [fdr, fname, ext] = fileparts(fPath);
+            piv_result_bak    = piv_result;
+            save(fullfile(fdr, [fname '_old' ext]), 'piv_result_bak', '-v7');
         end
 
-        % Overwrite
-        save(fPath, 'piv_result', '-v7.3');
+        % Rotate in-place, keeping single precision throughout
+        U = piv_result{end}.ux;
+        V = piv_result{end}.uy;
 
-        if mod(k, 50) == 0 || k == numel(frameFiles)
-            fprintf('  Processed %d / %d files\n', k, numel(frameFiles));
-        end
+        piv_result{end}.ux =  cosT .* U + sinT .* V;
+        piv_result{end}.uy = -sinT .* U + cosT .* V;
+
+        % '-v7' is ~3-5x faster than '-v7.3' for small arrays (no HDF5 overhead)
+        save(fPath, 'piv_result', '-v7');
 
     end
 
-    fprintf('✓ Done. All frames rotated by %.5f deg.\n', rad2deg(theta));
+    fprintf('✓ Done. All %d frames rotated by %.5f deg.\n', nFiles, rad2deg(theta));
 
 end
