@@ -9,6 +9,9 @@ y250_aoan04_aoafn04pivrepeat/
 y250_aoan04_aoafn06piv/
 calib_tools/
 pivtools_mean_UV_allcams.mat
+pivtools_mean_UV_allcams_corrected.mat
+
+
 
 # Individual scripts to exclude
 piv_precheck.m
@@ -19,7 +22,8 @@ velprofilepiv.m
 windowingdiagnostic.m
 PIV_stitchingv2.m
 
-# MATLAB autosaves and temporary files
+# MATLAB autosaves and temporary files, mat files
+*.mat
 *.asv
 *.autosave
 *.m~
