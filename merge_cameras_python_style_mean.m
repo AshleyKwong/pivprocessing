@@ -62,6 +62,7 @@ else
     fprintf('Using provided world grid: %d x %d\n', size(worldX,2), size(worldX,1));
 end
 
+
 %% STEP 2: Interpolate all cameras to unified grid
 camera_interp = cell(1, nCams);
 
@@ -133,23 +134,30 @@ for cam = 1:nCams
     camera_interp{cam}.v = v_interp;
     camera_interp{cam}.valid = valid;
 end
+%% DIAGNOSTIC: Check actual x-extent of valid regions per camera
+fprintf('\n=== Valid region x-extents on merged grid ===\n');
+for cam = 1:nCams
+    valid_cols = any(camera_interp{cam}.valid, 1);  % any valid row in each column
+    x_valid = worldX(1, valid_cols);
+    fprintf('  Cam%d: x=[%.2f, %.2f] mm, %d valid columns\n', ...
+        cam, min(x_valid), max(x_valid), sum(valid_cols));
+end
 
-%% STEP 3: Compute weights using distance transform
+%% STEP 3: Compute weights using distance transform - FIXED TAPER
 camera_weights = cell(1, nCams);
+
+% Fixed taper width in grid points - set to ~half your overlap width
+% Your overlap looks ~200-300 px wide, so 150 is a good starting point
+taper_width_pts = 25;
 
 for cam = 1:nCams
     valid_mask = camera_interp{cam}.valid;
     
-    % Distance from edge of valid region (in pixels)
+    % Distance from edge of valid region (in grid points)
     edge_dist = bwdist(~valid_mask);
     
-    % Normalize to [0, 1]
-    max_dist = max(edge_dist(:));
-    if max_dist > 0
-        norm_dist = edge_dist / max_dist;
-    else
-        norm_dist = zeros(size(edge_dist));
-    end
+    % Normalise to [0,1] using FIXED taper width, cap at 1
+    norm_dist = min(edge_dist / taper_width_pts, 1.0);
     
     % Apply window function
     weight = apply_window(norm_dist, window_type, taper_param);
@@ -159,8 +167,8 @@ for cam = 1:nCams
     
     camera_weights{cam} = weight;
     
-    fprintf('Camera %d: max_dist=%.1f px, weight range=[%.3f, %.3f]\n', ...
-        cam, max_dist, min(weight(valid_mask)), max(weight(valid_mask)));
+    fprintf('Camera %d: taper_width=%d px, weight range=[%.3f, %.3f]\n', ...
+        cam, taper_width_pts, min(weight(valid_mask)), max(weight(valid_mask)));
 end
 
 %% STEP 4: Normalize weights to sum to 1
@@ -172,8 +180,30 @@ end
 for cam = 1:nCams
     camera_weights{cam} = camera_weights{cam} ./ max(total_weight, eps);
 end
+%% DIAGNOSTIC: Inspect total_weight before and after normalisation
+figure;
+subplot(2,1,1);
+imagesc(total_weight);
+colorbar;
+clim([0 2]);
+title('total\_weight before normalisation (should be >1 in overlaps)');
+xlabel('x grid point'); ylabel('y grid point');
 
-%% STEP 5: Blend
+subplot(2,1,2);
+% Show a horizontal slice through the middle of the domain
+mid_row = round(size(total_weight, 1) / 2);
+plot(total_weight(mid_row, :));
+yline(1.0, 'r--', 'sum = 1');
+title(sprintf('Horizontal slice at row %d', mid_row));
+xlabel('x grid point'); ylabel('total weight');
+ylim([0 2.5]);
+
+% Also print per-camera max_dist values for comparison
+fprintf('\n=== Weight diagnostic ===\n');
+for cam = 1:nCams
+    fprintf('  Cam%d: max_dist in grid points = %.1f\n', cam, max(bwdist(~camera_interp{cam}.valid), [], 'all'));
+end
+%% STEP 6: Blend
 U_merged = zeros(size(worldX));
 V_merged = zeros(size(worldX));
 

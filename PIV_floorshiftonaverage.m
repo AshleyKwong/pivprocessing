@@ -38,7 +38,7 @@ for cameraNo = 1:numel(cameraList) % per each camera we are going to average wit
     pivtools_mean_V     = [];
     pivtools_mean_count = 0;
  
-    for loopNo = 2%:length(totalLoops)
+    for loopNo = 1%:length(totalLoops)
         loopU = [];
         loopV = [];
         fprintf('\n%s\n', fullfile(savePath, totalLoops(loopNo).name, ...
@@ -154,94 +154,122 @@ end % end of cam
 %-------------------------------------------------------------------------
 %% loading the floor
 close all;
-mean_pivtools = load('C:\Users\ak1u24\Downloads\pivtools_mean_UV_allcams.mat'); 
-coords_per_cam = mean_pivtools.coords_per_cam; 
-mean_U_per_cam = mean_pivtools.mean_U_per_cam; 
+% cameraList = ["Cam1","Cam2","Cam3","Cam4","Cam5"];
 
-% *** NEW: pre-allocate a row per camera to store [slope, intercept]
-p_C_per_cam = nan(numel(cameraList), 2);
-% now we will load the floor correction per camera
-coords_per_cam_corrected = struct();
-coords_per_cam_corrected.x1_mm = cell(1, numel(cameraList));
-coords_per_cam_corrected.x2_mm = cell(1, numel(cameraList));
+% % --- Robust load: handles both flat and nested .mat structures ----------
+% matPath  = 'C:\Users\ak1u24\Downloads\pivtools_mean_UV_allcams.mat';
+% raw      = load(matPath);
+% 
+% % Show what's actually in the file so you can see the structure
+% disp('Variables found in .mat file:');
+% disp(fieldnames(raw));
+% 
+% if isfield(raw, 'mean_pivtools')
+%     % Nested case: everything lives inside mean_pivtools struct
+%     mean_pivtools  = raw.mean_pivtools;
+%     coords_per_cam = mean_pivtools.coords_per_cam;
+%     mean_U_per_cam = mean_pivtools.mean_U_per_cam;
+%     mean_V_per_cam = mean_pivtools.mean_V_per_cam;
+% else
+%     % Flat case: variables saved directly at top level
+%     coords_per_cam = raw.coords_per_cam;
+%     mean_U_per_cam = raw.mean_U_per_cam;
+%     mean_V_per_cam = raw.mean_V_per_cam;
+%     % Reconstruct mean_pivtools as a container for new outputs
+%     mean_pivtools  = raw;
+% end
+% % -----------------------------------------------------------------------
+% 
 cam_y_bands = [ ...
-   -12,  -10;   % Cam1
-   -6,  -3;   % Cam2
-   -14,  -10;   % Cam3
-   -21,  -16;   % Cam4
-   -0.5,  10 ]; % Cam5
+   -14,   10;   % Cam1
+    -7,   10;   % Cam2
+   -15,   10;   % Cam3
+   -21,   10;   % Cam4
+    -0.5, 10 ]; % Cam5
+
 for cameraNo = 1:numel(cameraList)
-    x_vec_pt = coords_per_cam{cameraNo}.x(1, :);
-    y_vec    = coords_per_cam{cameraNo}.y(:, 1);
+
+    % --- Coordinates (struct inside cell — note {}, not .) ----------
+    x_vec_pt = coords_per_cam{cameraNo}.x(1, :);   % [1 x nX]
+    y_vec    = coords_per_cam{cameraNo}.y(:, 1);    % [nY x 1]
+
+    % --- Floor detection --------------------------------------------
     [~, p_C, ~, floor_y_C, ~, pitch_C_mm] = PIV_detectFloor( ...
-        x_vec_pt, y_vec, mean_U_per_cam{cameraNo}, ...
-        cam_y_bands(cameraNo, 1), cam_y_bands(cameraNo, 2));   % ← per-camera     p_C_per_cam(cameraNo, :) = p_C;
-    
-    
-    mean_pivtools.pC{cameraNo} = p_C; % save a copy.
-    pitch_C_deg = atand(p_C(1));
-    theta_rad         = atan(p_C(1)); 
-    theta_per_cam(cameraNo) = theta_rad;
+        x_vec_pt, y_vec, mean_U_per_cam{cameraNo}, cam_y_bands(cameraNo,1), cam_y_bands(cameraNo,2)); %cam_y_bands(cameraNo,1), cam_y_bands(cameraNo,2)
 
-    C_fit = polyval(p_C, x_vec_pt);
-    nY          = size(coords_per_cam{cameraNo}.y, 1);
-    C_fit_grid  = repmat(C_fit, nY, 1);     % [nY x nX]  broadcast to full grid
+    p_C_per_cam(cameraNo, :)       = p_C;           % ← was cut off before
+    mean_pivtools.pC{cameraNo}     = p_C;
+    pitch_C_deg                    = atand(p_C(1));
+    theta_rad                      = atan(p_C(1));
+    theta_per_cam(cameraNo)        = theta_rad;
 
-    coords_per_cam_corrected.x2_mm{cameraNo} = coords_per_cam{cameraNo}.y - C_fit_grid;  % floor-referenced y
-    coords_per_cam_corrected.x1_mm{cameraNo} =coords_per_cam{cameraNo}.x ;  % floor-referenced y
-    
-    % --- 2. ROTATION: align velocity vectors with floor frame ------------
-    U = mean_U_per_cam{cameraNo};   % [nY x nX]
-    V = mean_V_per_cam{cameraNo};   % [nY x nX]
+    % --- Floor shift on coordinates ---------------------------------
+    C_fit      = polyval(p_C, x_vec_pt);            % [1 x nX]
+    nY         = size(coords_per_cam{cameraNo}.y, 1);
+    C_fit_grid = repmat(C_fit, nY, 1);              % [nY x nX]
 
-    % theta > 0 means floor rises in +X  →  rotate frame by -theta
+    coords_per_cam_corrected.x1_mm{cameraNo} = coords_per_cam{cameraNo}.x;
+    coords_per_cam_corrected.x2_mm{cameraNo} = coords_per_cam{cameraNo}.y - C_fit_grid;
+
+    % --- Velocity rotation ------------------------------------------
+    U = mean_U_per_cam{cameraNo};
+    V = mean_V_per_cam{cameraNo};
     mean_pivtools.mean_U_per_cam_rotated{cameraNo} =  U * cos(theta_rad) + V * sin(theta_rad);
     mean_pivtools.mean_V_per_cam_rotated{cameraNo} = -U * sin(theta_rad) + V * cos(theta_rad);
 
+    % ================================================================
+    %  PLOTS
+    % ================================================================
+    figure('Name', sprintf('%s – Floor correction summary', cameraList(cameraNo)), ...
+           'Units','normalized', 'Position',[0.1 0.05 0.8 0.9]);
 
-    % --- plots (unchanged) ---
-    figure();
+    % --- Subplot 1: Raw <U>, original coordinates, unrotated --------
     ax1 = subplot(3,1,1);
-    imagesc(coords_per_cam_corrected.x1_mm{cameraNo}(1, :), coords_per_cam_corrected.x2_mm{cameraNo}(:,1), mean_U_per_cam{cameraNo});
+    imagesc(x_vec_pt, y_vec, mean_U_per_cam{cameraNo});
     set(gca,'YDir','normal'); axis image; colormap(gca, jet);
     colorbar; clim([0 30]); hold on;
-    plot(x_vec_pt, floor_y_C,             'g.',  'MarkerSize', 4);
-    plot(x_vec_pt, polyval(p_C,x_vec_pt), 'g-',  'LineWidth', 2);
+    plot(x_vec_pt, floor_y_C, 'g.', 'MarkerSize', 4, ...
+        'DisplayName', 'Detected floor points');
+    plot(x_vec_pt, C_fit,     'g-', 'LineWidth', 2,  ...
+        'DisplayName', sprintf('Linear fit  (%.5f°)', pitch_C_deg));
     xlabel('X (mm)'); ylabel('Y (mm)');
-    title('Wall detections and linear fits');
-    legend('Method C raw','Method C fit', 'Location','northeast');
-    
-    ax2 = subplot(3,1,2);
-    imagesc(coords_per_cam_corrected.x1_mm{cameraNo}(1, :), coords_per_cam_corrected.x2_mm{cameraNo}(:,1),  mean_pivtools.mean_U_per_cam_rotated{cameraNo});
-    set(gca,'YDir','normal'); axis image; colormap(gca, jet);
-    colorbar; clim([0 30]); hold on;
-    plot(x_vec_pt, floor_y_C,             'g.',  'MarkerSize', 4);
-    plot(x_vec_pt, polyval(p_C,x_vec_pt), 'g-',  'LineWidth', 2);
-    xlabel('X (mm)'); ylabel('Y (mm)');
-    title('Rotated plane');
-    legend('Method C raw','Method C fit', 'Location','northeast');
-    ax3 = subplot(3, 1, 3);
-    hold on;
-    plot(x_vec_pt, C_fit, 'g.', 'MarkerSize', 4, ...
-        'DisplayName', sprintf('Method C residual  (rise=%.3f mm, %.5f°)', pitch_C_mm, pitch_C_deg));
-    plot(x_vec_pt, floor_y_C, 'bo', 'MarkerFaceColor','b', 'MarkerEdgeColor','b', ...
-        'MarkerSize', 10, ...
-        'DisplayName', sprintf('Method C Raw y  (rise=%.3f mm, %.5f°)', pitch_C_mm, pitch_C_deg));
-    xlabel('X (mm)'); ylabel('Residual (mm)');
-    grid on; hold off;
-    linkaxes([ax1, ax2,  ax3], 'x');
-    
-    % --- apply floor shift via function ---
-    % camDir = fullfile(savePath, totalLoops(loopNo).name, ...
-    %     'calibrated_piv', '150', cameraList(cameraNo), 'instantaneous/');
-    % PIV_applyFloorShift(fullfile(camDir, 'coordinates.mat'), p_C_per_cam(cameraNo, :)); 
-end
-save('pivtools_mean_UV_allcams.mat', 'mean_pivtools')
+    title(sprintf('%s  |  Raw \\langle U \\rangle — original lab coordinates, unrotated vectors', ...
+        cameraList(cameraNo)));
+    legend('Location','northeast');
 
-% % *** NEW: save all p_C coefficients alongside the loop data
-% floorFitPath = fullfile(savePath, totalLoops(loopNo).name, 'floor_fits.mat');
-% save(floorFitPath, 'p_C_per_cam', 'cameraList');
-% fprintf('Saved floor fit coefficients → %s\n', floorFitPath);
+    % --- Subplot 2: Corrected <U>, floor-shifted coords, rotated ----
+    ax2 = subplot(3,1,2);
+    imagesc(coords_per_cam_corrected.x1_mm{cameraNo}(1,:), ...
+            coords_per_cam_corrected.x2_mm{cameraNo}(:,1), ...
+            mean_pivtools.mean_U_per_cam_rotated{cameraNo});
+    set(gca,'YDir','normal'); axis image; colormap(gca, jet);
+    colorbar; clim([0 30]); hold on;
+    yline(0, 'w--', 'LineWidth', 1.5, 'DisplayName', 'Wall  (y = 0)');
+    xlabel('X (mm)'); ylabel('y – y_{wall}  (mm)');
+    title(sprintf('%s  |  Corrected \\langle U \\rangle — floor-referenced coordinates, rotated vectors', ...
+        cameraList(cameraNo)));
+    legend('Location','northeast');
+
+    % --- Subplot 3: Floor detection diagnostic ----------------------
+    ax3 = subplot(3,1,3);
+    hold on;
+    plot(x_vec_pt, floor_y_C, 'b.', 'MarkerSize', 6, ...
+        'DisplayName', 'Detected floor points');
+    plot(x_vec_pt, C_fit,     'g-', 'LineWidth', 2, ...
+        'DisplayName', sprintf('Linear fit:  slope=%.5f,  intercept=%.4f mm,  rise=%.3f mm,  %.5f°', ...
+        p_C(1), p_C(2), pitch_C_mm, pitch_C_deg));
+    xlabel('X (mm)'); ylabel('Y (mm)');
+    title(sprintf('%s  |  Floor detection — detected points vs linear fit', cameraList(cameraNo)));
+    legend('Location','best'); grid on; hold off;
+
+    linkaxes([ax1, ax2, ax3], 'x');
+
+end
+% Add this just before the save line
+mean_pivtools.coords_per_cam_corrected = coords_per_cam_corrected;
+
+
+save('pivtools_mean_UV_allcams_corrected.mat', 'mean_pivtools');
 
 %% now need to interpolate onto a grid
 

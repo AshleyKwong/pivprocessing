@@ -4,7 +4,7 @@
 clear; clc; close all;
 
 %%
-savePath   = '/iridisfs/scratch/ak1u24/ProcessedPIV_case2fullpipe';  % ← UPDATE if different
+savePath   = '/iridisfs/scratch/ak1u24/ProcessedPIV_fullpipeline';  % ← UPDATE if different
 cameraList = ["Cam1","Cam2","Cam3","Cam4","Cam5"];
 
 %% DISCOVER LOOP FOLDERS

@@ -10,55 +10,27 @@ set(groot, 'defaultTextFontName', 'Cambira Math');
 set(groot, 'defaultTextFontSize', 12);
 set(groot, 'defaultTextColor', 'k');
 cameraList  = ["Cam1", "Cam2", "Cam3", "Cam4", "Cam5"];  
-savePath = 'E:\Case 6 PIV pivtools Processed\'; % path where data lives and will be saved.
+savePath = 'E:\case1_testmask\'; % path where data lives and will be saved.
+
 
 %% USER OPTIONS
-SKIP_LOOP_PROCESSING = true;  % Set to true to skip loop processing (if already done)
-FORCE_RECOMPUTE_AVG = false;   % Set to true to recompute average even if it exists
+SKIP_LOOP_PROCESSING = false;  % Set to true to skip loop processing (if already done)
+FORCE_RECOMPUTE_AVG = true;   % Set to true to recompute average even if it exists
 
 %%
 % the size of the image should correspond to the physical location
 % import the calibration
 addpath(genpath('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\OFI\calib_tools\'));
-load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\OFI\calib_tools\poly_2d2c\Step_01_Calibration\y235_aoan11_aoafn11\calib_AK.mat');% calib struct
+load('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\OFI\calib_tools\poly_2d2c\Step_01_Calibration\calib_onecam\calib_allcamerascropped_floorpixelspecify_20260303_211711.mat');% calib struct
 
 % frame is the size of the raw PIV image --> need this for dewarping !
 % case 6
 frame = {zeros(3528,5312, 'single'),zeros(3472,5312,'single'),zeros(3512,5312,'single'),zeros(3536,5312,'single'), zeros(3520,5312,'single')}; % size of each camera from the calibration grid !
 
-%% DEWARPING
+% DEWARPING
 cx_img = est_dewarp_size_2d(frame,calib);
 [~,cx_img,px_img] = dewarp_image_2d(frame,calib, cx_img);
-
-% -------- MAKE THE WORLD GRID. -----------------------------------
-x1_min = cellfun(@(c) min(c.x1(1,:)), cx_img, 'UniformOutput', true);
-x1_max = cellfun(@(c) max(c.x1(1,:)), cx_img, 'UniformOutput', true);
-x2_min = cellfun(@(c) min(c.x2(:,1)), cx_img, 'UniformOutput', true);
-x2_max = cellfun(@(c) max(c.x2(:,1)), cx_img, 'UniformOutput', true);
-
 dt = 49.6 * 10^-6; % bw frames
-magFactor = zeros(2,5);
-for i = 1:5
-    magFactor(1, i) = calib.var{i}.mmppix(1);
-    magFactor(2, i) = calib.var{i}.mmppix(2);
-end
-
-mean_del_x1 = mean(magFactor(1,:));
-mean_del_x2 = mean(magFactor(2, :));
-windowsize = [16,16];
-overlap_percentage = 20;
-dx1 = mean_del_x1*windowsize(2)*(1-overlap_percentage/100);
-dx2 = mean_del_x1*windowsize(1)*(1-overlap_percentage/100);
-[worldx1, worldx2]= meshgrid(min(x1_min):dx1:max(x1_max), min(x2_max):-dx2:max(x2_min));
-worldx1 = (single(worldx1));
-worldx2= single(worldx2);
-
-
-worldGrid = struct();
-worldGrid.x1 = worldx1;
-worldGrid.x2 = worldx2;
-worldGrid.dx1 = dx1;
-worldGrid.dx2 = dx2;
 %% MAIN PROCESSING LOOP
 % Get all directories and filter for "loop=XX" format only
 d = dir(savePath); 
@@ -87,7 +59,6 @@ if SKIP_LOOP_PROCESSING
     fprintf('Loading existing data for averaging and visualization.\n\n');
 else
     tic;
-    final_pass_index = 5;  % Renamed from numOfWindows for clarity
     skip_frames = []; % Define frames to skip if needed
 
     for loopNo = 1:length(totalLoops)
@@ -113,14 +84,13 @@ else
         
         % Get number of frames
         d = dir(fullfile(saveFolder, 'uncalibrated_piv'));
-        numImages = d(~ismember({d.name}, {'.', '..'}));
+        numImages = d(~ismember({d.name}, {'.', '..'})); % this will always be the same for every subfolder
         
         % Get first camera's file list to determine total frames
         base_dir_sample = dir(fullfile(saveFolder, 'uncalibrated_piv', numImages(1).name, ...
             'Cam1', 'instantaneous', '*.mat'));
-        nTotalFrames = length(base_dir_sample) - 1;
+        nTotalFrames = length(base_dir_sample) - 1; % ignoring the coordinates.mat file
         nValidFrames = nTotalFrames - length(skip_frames);
-        
         % Preallocate allCameras struct
         allCameras = struct();
         allCameras.u = cell(nValidFrames, 5);
@@ -137,8 +107,8 @@ else
             % Load first frame to get window centers (if not already loaded)
             if ~skipCalibration
                 firstFrameData = load(fullfile(base_dir(1).folder, base_dir(1).name));
-                window_centers_y = single(firstFrameData.piv_result(final_pass_index).win_ctrs_y);
-                window_centers_x = single(firstFrameData.piv_result(final_pass_index).win_ctrs_x);
+                window_centers_y = single(firstFrameData.piv_result(end).win_ctrs_y);
+                window_centers_x = single(firstFrameData.piv_result(end).win_ctrs_x);
                 
                 % Compute window center grid ONCE per camera (in pixels)
                 [wincenter_px1, wincenter_px2] = meshgrid(window_centers_x, window_centers_y);
@@ -147,6 +117,7 @@ else
                 % Each camera has unique calibration transformation
                 cx_windowcenterx1_mm = polyvaln(calib.fit_cx1{a}.p, [wincenter_px1(:), wincenter_px2(:)]);
                 cx_windowcenterx2_mm = polyvaln(calib.fit_cx2{a}.p, [wincenter_px1(:), wincenter_px2(:)]);
+
                 cx_windowcenterx1_mm = reshape(cx_windowcenterx1_mm, size(wincenter_px1));
                 cx_windowcenterx2_mm = reshape(cx_windowcenterx2_mm, size(wincenter_px2));
                 
@@ -184,8 +155,8 @@ else
                 frameData = load(frameFile, 'piv_result');  % Load only piv_result field
 
                 % Extract velocity in pixels
-                velocity_uy = single(frameData.piv_result(final_pass_index).uy);
-                velocity_ux = single(frameData.piv_result(final_pass_index).ux);
+                velocity_uy = single(frameData.piv_result(end).uy);
+                velocity_ux = single(frameData.piv_result(end).ux);
                 clear frameData;
 
                 % Compute pixel positions after displacement
@@ -195,6 +166,7 @@ else
                 % Convert displaced positions to mm using camera-specific calibration
                 cx_velgrid_x1_mm = polyvaln(calib.fit_cx1{a}.p, [px1_grid(:), px2_grid(:)]);
                 cx_velgrid_x2_mm = polyvaln(calib.fit_cx2{a}.p, [px1_grid(:), px2_grid(:)]);
+
                 cx_velgrid_x1_mm = reshape(cx_velgrid_x1_mm, size(velocity_uy));
                 cx_velgrid_x2_mm = reshape(cx_velgrid_x2_mm, size(velocity_uy));
                 
@@ -234,7 +206,7 @@ end
 
 %% VISUALIZATION: Check single frame
 % Commented out GIF generation - uncomment only if needed
-% generateCorrelationGifs(saveFolder, cameraList, final_pass_index);
+% generateCorrelationGifs(saveFolder, cameraList, end);
 
 %% AVERAGE VELOCITY FIELDS
 % Check if average already exists
@@ -332,7 +304,6 @@ end
 %% VISUALIZATION: Mean velocity fields
 figure('Position', [100, 100, 1200, 800], 'Visible', 'on');
 meanU = avgVelocityField.u(1, :);
-
 for cam = 1:5
     subplot(2, 3, cam);
     imagesc(meanU{cam});
@@ -346,21 +317,22 @@ end
 sgtitle('Raw Mean U Velocity Fields Across 5 Cameras', 'FontSize', 14);
 
 %% CAMERA MERGING - Median with Tukey window
+
 velocityU = avgVelocityField.u(1, :);
 velocityV = avgVelocityField.v(1, :);
 masks = {};
 % addpath for the functions
-addpath(genpath('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\PIV')); 
-
-
+% addpath(genpath('C:\Users\ak1u24\OneDrive - University of Southampton\MATLAB\Experimental Campaign 1\PIV')); 
+% 
+% 
 % Load physical locations for merging (from first loop folder)
 load(fullfile(savePath, totalLoops(1).name, 'windowCenterCameras_mm.mat'), 'windowCenterCameras_mm');
-
-% [worldX, worldY, U_tukey, ~] = merge_cameras_python_style_median(...
-%     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
 % 
-[~, ~, U_hann, ~] = merge_cameras_python_style_median(...
-    windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
+% % [worldX, worldY, U_tukey, ~] = merge_cameras_python_style_median(...
+% %     windowCenterCameras_mm, velocityU, velocityV, masks, 'tukey', 0.5);
+% % 
+% [~, ~, U_hann, ~] = merge_cameras_python_style_median(...
+%     windowCenterCameras_mm, velocityU, velocityV, masks, 'hann', []);
 % 
 % % Compare
 % figure('Visible', 'on');
@@ -385,19 +357,22 @@ load(fullfile(savePath, totalLoops(1).name, 'windowCenterCameras_mm.mat'), 'wind
 
 % Compare
 figure('Visible', 'on');
-% subplot(2,1,1); 
-% imagesc(worldX(1,:), (worldY(:, 1)), U_tukey_mean); 
+% subplot(2,1,1);
+% imagesc(worldX(1,:), (worldY(:, 1)), U_tukey_mean);
 % set(gca, 'YDir', 'normal');
-% 
+%
 % title('Tukey'); colorbar;
 % axis image;
 % 
 % subplot(2,1,2); 
 imagesc(worldX(1,:), (worldY(:, 1)), U_hann_mean); % no need to flip - just set ydir as normal.
-title('Hann'); colorbar;
+hold on; 
+% yline(0, "b--", LineWidth = 3)
+title('Hann avg on 10 frames'); colorbar;
 axis image;
 set(gca, 'YDir', 'normal');
 colormap(jet);
+
 % sgtitle("Mean Merging: Tukey vs Hann");
 % profile --> extraction --> plot over HWA
 
@@ -407,18 +382,21 @@ turbStats = computeTurbulenceStatistics(savePath, totalLoops, avgVelocityField, 
     'Verbose', true,...
     'ForceRecompute', false,...
     'VelocityThreshold', [-10, 35], ...      % Valid velocity range in m/s
-    'FluctuationThreshold', 20, ...        % Max reasonable fluctuation
+    'FluctuationThreshold', 30, ...        % Max reasonable fluctuation
     'MinValidFraction', 0.7);              % Need 70% valid frames per point
 
 %% visualize turb stats
-[worldX, worldY, U_turbint, ~] = merge_cameras_python_style_mean(...
-    windowCenterCameras_mm, turbStats.u_rms, turbStats.v_rms, masks, 'hann', []);
+[worldX, worldY, U_turvariance, ~] = merge_cameras_python_style_mean(...
+    windowCenterCameras_mm, turbStats.u_variance, turbStats.u_variance, masks, 'hann', []);
 figure(3); 
 hold on; 
-imagesc(worldX(1,:), (worldY(:, 1)),U_turbint); 
+imagesc(worldX(1,:), (worldY(:, 1)),U_turvariance); 
 set(gca, 'YDir', 'normal');
 colormap(parula(10)); clim([0 2])
+colorbar(); 
 axis image;
+%% two point corr sandbox 
+two
 %%
 % load(fullfile(savePath, 'hanning_vs_potential_comparison.mat')); % loads comparison results
 % extract the y values of the mask
@@ -503,7 +481,7 @@ legend('Freestream boundary', 'Selected freestream line');
 
 
 %% OPTIONAL: Function to generate correlation GIFs (commented out by default)
-function generateCorrelationGifs(saveFolder, cameraList, final_pass_index)
+function generateCorrelationGifs(saveFolder, cameraList)
     % Uncomment and call this function only when you need correlation diagnostics
     d = dir(fullfile(saveFolder, 'uncalibrated_piv'));
     numImages = d(~ismember({d.name}, {'.', '..'}));
@@ -520,7 +498,7 @@ function generateCorrelationGifs(saveFolder, cameraList, final_pass_index)
         fig = figure('Visible', 'off');
         for f = 1:nFrames
             cameraData = load(fullfile(camDir(f).folder, camDir(f).name));
-            pm = squeeze(cameraData.piv_result(final_pass_index).peak_mag);
+            pm = squeeze(cameraData.piv_result(end).peak_mag);
             imagesc(pm);
             axis image off;
             colorbar;

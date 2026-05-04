@@ -1,46 +1,15 @@
 function PIV_applyVelocityRotation(camInstDir, p_C, opts)
-% PIV_applyVelocityRotation  Rotate PIV velocity vectors into the floor-aligned frame.
-%
-%   PIV_applyVelocityRotation(camInstDir, p_C)
-%   PIV_applyVelocityRotation(camInstDir, p_C, BackupOld=true)
-%
-%   Inputs
-%   ------
-%   camInstDir : char | string
-%       Full path to the 'instantaneous' subfolder for one camera, e.g.:
-%       'E:\ProcessedPIV_case2fullpipe\loop=05\calibrated_piv\150\Cam1\instantaneous'
-%
-%   p_C        : 1x2 double
-%       Linear floor-fit coefficients [slope, intercept] from PIV_detectFloor.
-%       The rotation angle is derived as theta = atan(p_C(1)).
-%
-%   Options (name-value)
-%   --------------------
-%   BackupOld  : logical, default false
-%       If true, saves each original file as 00001_old.mat etc. before
-%       overwriting. WARNING: this doubles disk usage — only use on a
-%       small subset to verify the rotation is correct first.
-%
-%   What it does
-%   ------------
-%   For every 000XX.mat file in camInstDir:
-%     1. Loads piv_result  (1x3 cell array)
-%     2. Rotates piv_result{end}.ux and piv_result{end}.uy by -theta
-%        (transforms from tilted lab frame into floor-parallel / wall-normal frame)
-%     3. Leaves piv_result{1}, piv_result{2}, and b_mask untouched
-%     4. Overwrites the original .mat file with the modified piv_result
-%
-%   Rotation applied (same theta for all frames — it is a property of the rig):
-%       U_rot =  U*cos(theta) + V*sin(theta)
-%       V_rot = -U*sin(theta) + V*cos(theta)
 
     arguments
-        camInstDir  (1,1) string
-        p_C         (1,2) double
-        opts.BackupOld (1,1) logical = false
+        camInstDir          (1,1) string
+        p_C                 (1,2) double
+        opts.BackupOld      (1,1) logical = false
+        opts.SaveUnrotated  (1,1) logical = false
     end
 
-    camInstDir = char(camInstDir);
+    camInstDir     = char(camInstDir);
+    doBackup       = opts.BackupOld;
+    doUnrotated    = opts.SaveUnrotated;
 
     if ~isfolder(camInstDir)
         error('PIV_applyVelocityRotation:folderNotFound', ...
@@ -48,20 +17,20 @@ function PIV_applyVelocityRotation(camInstDir, p_C, opts)
     end
 
     % ------------------------------------------------------------------
-    %  1.  Derive rotation angle from floor fit slope
+    %  1.  Rotation constants
     % ------------------------------------------------------------------
-    theta = atan(p_C(1));   % radians; same for every frame in this camera
+    theta = atan(p_C(1));
+    cosT  = single(cos(theta));
+    sinT  = single(sin(theta));
+
     fprintf('Camera folder : %s\n', camInstDir);
     fprintf('Floor slope   : %.6f  →  theta = %.6f rad (%.5f deg)\n', ...
             p_C(1), theta, rad2deg(theta));
 
-    cosT =  cos(theta);
-    sinT =  sin(theta);
-
     % ------------------------------------------------------------------
-    %  2.  Discover all frame files (exclude coordinates*.mat)
+    %  2.  Discover frame files
     % ------------------------------------------------------------------
-    allFiles  = dir(fullfile(camInstDir, '*.mat'));
+    allFiles   = dir(fullfile(camInstDir, '*.mat'));
     frameFiles = allFiles(~contains({allFiles.name}, 'coordinates'));
 
     if isempty(frameFiles)
@@ -70,49 +39,79 @@ function PIV_applyVelocityRotation(camInstDir, p_C, opts)
         return
     end
 
-    fprintf('Found %d frame files. Rotating...\n', numel(frameFiles));
+    nFiles    = numel(frameFiles);
+    filePaths = fullfile({frameFiles.folder}, {frameFiles.name})';
+    fprintf('Found %d frame files. Rotating (parfor)...\n', nFiles);
 
     % ------------------------------------------------------------------
-    %  3.  Loop over frames
+    %  3.  Copy originals to 'unrotated/' BEFORE touching anything
     % ------------------------------------------------------------------
-    for k = 1:numel(frameFiles)
+    unrotatedDir = fullfile(camInstDir, 'unrotated');
 
-        fPath = fullfile(frameFiles(k).folder, frameFiles(k).name);
+    if doUnrotated
+        if ~isfolder(unrotatedDir)
+            mkdir(unrotatedDir);
+            fprintf('  Created backup folder: %s\n', unrotatedDir);
+        else
+            fprintf('  Backup folder already exists, skipping copy: %s\n', unrotatedDir);
+        end
+        fprintf('  Copying %d original files to unrotated/ ...', nFiles);
+        for k = 1:nFiles
+            [~, fname, ext] = fileparts(filePaths{k});
+            destPath = fullfile(unrotatedDir, [fname ext]);
+            if ~isfile(destPath)
+                copyfile(filePaths{k}, destPath);
+            end
+        end
+        fprintf(' done.\n');
+    end
 
-        % Load
+    % ------------------------------------------------------------------
+    %  4.  Parallel rotation loop
+    %      save() with a string variable name causes a parfor transparency
+    %      violation — solved by delegating to helper functions below.
+    % ------------------------------------------------------------------
+    parfor k = 1:nFiles
+
+        fPath      = filePaths{k};
         loaded     = load(fPath, 'piv_result');
-        piv_result = loaded.piv_result;   %#ok<NASGU> — will be modified below
+        piv_result = loaded.piv_result;  %#ok<PFBNS>
 
-        % Extract U and V from the last cell (index 3 = end)
-        U = double(piv_result{end}.ux);
-        V = double(piv_result{end}.uy);
-
-        % Rotate
-        U_rot =  cosT .* U + sinT .* V;
-        V_rot = -sinT .* U + cosT .* V;
-
-        % Write back (preserve original numeric class)
-        piv_result{end}.ux = cast(U_rot, class(piv_result{end}.ux));
-        piv_result{end}.uy = cast(V_rot, class(piv_result{end}.uy));
-
-        % Optional backup
-        if opts.BackupOld
-            [~, fname, ext] = fileparts(fPath);
-            backupPath = fullfile(frameFiles(k).folder, [fname '_old' ext]);
-            loaded_orig = load(fPath, 'piv_result'); %#ok — re-read before overwrite
-            piv_result_orig = loaded_orig.piv_result;
-            save(backupPath, 'piv_result_orig', '-v7.3');
+        % Optional per-file backup (also uses helper to avoid violation)
+        if doBackup
+            [fdr, fname, ext] = fileparts(fPath);
+            piv_result_bak    = piv_result;
+            savePivResultBak(fullfile(fdr, [fname '_old' ext]), piv_result_bak);
         end
 
-        % Overwrite
-        save(fPath, 'piv_result', '-v7.3');
+        % Rotate in-place, keeping single precision
+        U = piv_result{end}.ux;
+        V = piv_result{end}.uy;
 
-        if mod(k, 50) == 0 || k == numel(frameFiles)
-            fprintf('  Processed %d / %d files\n', k, numel(frameFiles));
-        end
+        piv_result{end}.ux =  cosT .* U + sinT .* V;
+        piv_result{end}.uy = -sinT .* U + cosT .* V;
+
+        % Use helper — avoids transparency violation
+        savePivResult(fPath, piv_result);
 
     end
 
-    fprintf('✓ Done. All frames rotated by %.5f deg.\n', rad2deg(theta));
+    fprintf('✓ Done. All %d frames rotated by %.5f deg.\n', nFiles, rad2deg(theta));
+    if doUnrotated
+        fprintf('  Unrotated originals preserved in: %s\n', unrotatedDir);
+    end
 
+end
+
+% ======================================================================
+%  Private helper functions — save() is transparent here because MATLAB
+%  can see exactly which variable is being written in each function scope.
+% ======================================================================
+
+function savePivResult(fPath, piv_result)
+    save(fPath, 'piv_result', '-v7');
+end
+
+function savePivResultBak(fPath, piv_result_bak)
+    save(fPath, 'piv_result_bak', '-v7');
 end

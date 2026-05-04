@@ -3,6 +3,7 @@
 % Subpixel peak locking diagnostic via the modulus method.
 % Pools fractional pixel displacements across all loops x 150 frames
 % per camera, builds histogram, fits b(eps) = A*sin(2*pi*eps + phi).
+% Cameras processed in parallel (parfor).
 % Saves peakLocking.mat to savePath — no figures generated (HPC safe).
 % Intended to run on Iridis6 via SLURM.
 
@@ -30,20 +31,43 @@ end
 fprintf('Found %d loop folders\n', length(totalLoops));
 
 %% BIN EDGES
-binEdges = linspace(0, 1, nBins + 1);   % nBins+1 edges → nBins bins
+binEdges   = linspace(0, 1, nBins + 1);   % nBins+1 edges → nBins bins
+binCentres = 0.5 * (binEdges(1:end-1) + binEdges(2:end));
 
-%% INITIALISE OUTPUT STRUCT
-peakLocking = struct();
+%% START PARALLEL POOL — read worker count from SLURM, fall back to detected cores
+nWorkers = str2double(getenv('SLURM_CPUS_PER_TASK'));
+if isnan(nWorkers) || nWorkers < 1
+    nWorkers = feature('numcores');
+end
+if isempty(gcp('nocreate'))
+    parpool('threads', nWorkers);
+end
+pool = gcp('nocreate');
+fprintf('Parallel pool ready with %d workers.\n', pool.NumWorkers);
 
-%% MAIN LOOP — per camera
-for a = 1:length(cameraList)
+%% PRE-ALLOCATE CELL ARRAYS FOR parfor RESULTS
+% parfor cannot write to a struct directly — accumulate into cells,
+% then assemble the struct after the parfor completes
+nCams = length(cameraList);
+
+hist_u_all      = cell(1, nCams);
+hist_v_all      = cell(1, nCams);
+bias_u_all      = cell(1, nCams);
+bias_v_all      = cell(1, nCams);
+fitResult_u_all = cell(1, nCams);
+fitResult_v_all = cell(1, nCams);
+nVec_u_all      = cell(1, nCams);
+nVec_v_all      = cell(1, nCams);
+
+%% MAIN LOOP — parfor over cameras
+parfor a = 1:nCams
 
     camName = cameraList(a);
     fprintf('\n=== %s ===\n', camName);
 
     % Accumulators for fractional parts across all loops x frames
-    frac_ux_all = [];   % streamwise (will be large vector)
-    frac_uy_all = [];   % wall-normal
+    frac_ux_all = [];
+    frac_uy_all = [];
 
     % --- Loop over all loop folders ------------------------------------
     for loopNo = 1:length(totalLoops)
@@ -64,7 +88,7 @@ for a = 1:length(cameraList)
         % --- Loop over all frames -------------------------------------
         for b = 1:length(base_dir)
 
-            frameData  = load(fullfile(base_dir(b).folder, base_dir(b).name), ...
+            frameData = load(fullfile(base_dir(b).folder, base_dir(b).name), ...
                 'piv_result');
             ux = double(frameData.piv_result(end).ux);   % streamwise px displacement
             uy = double(frameData.piv_result(end).uy);   % wall-normal px displacement
@@ -84,48 +108,56 @@ for a = 1:length(cameraList)
 
         end % frames
 
-        fprintf('  Loop %d/%d done (%d frames)\n', ...
-            loopNo, length(totalLoops), length(base_dir));
+        fprintf('  %s — Loop %d/%d done (%d frames)\n', ...
+            camName, loopNo, length(totalLoops), length(base_dir));
 
     end % loops
 
-    fprintf('  Total vectors pooled: %d (ux),  %d (uy)\n', ...
-        length(frac_ux_all), length(frac_uy_all));
+    fprintf('  %s — Total vectors pooled: %d (ux),  %d (uy)\n', ...
+        camName, length(frac_ux_all), length(frac_uy_all));
 
-    %% HISTOGRAMS
+    % HISTOGRAMS
     counts_u = histcounts(frac_ux_all, binEdges, 'Normalization', 'probability');
     counts_v = histcounts(frac_uy_all, binEdges, 'Normalization', 'probability');
 
-    % Bin centres for fitting
-    binCentres = 0.5 * (binEdges(1:end-1) + binEdges(2:end));   % [1 x nBins]
-
-    %% FIT SINUSOID:  b(eps) = A * sin(2*pi*eps + phi)
-    % Fit to (histogram - expected uniform level)
-    % Under no peak locking, counts_u should be flat at 1/nBins
+    % FIT SINUSOID:  b(eps) = A * sin(2*pi*eps + phi)
     uniformLevel = 1 / nBins;
-
-    bias_u = counts_u - uniformLevel;   % deviation from flat
+    bias_u = counts_u - uniformLevel;
     bias_v = counts_v - uniformLevel;
 
     fitResult_u = fitSinusoid(binCentres, bias_u);
     fitResult_v = fitSinusoid(binCentres, bias_v);
 
-    fprintf('  ux → A = %.4f px,  phi = %.4f rad\n', fitResult_u(1), fitResult_u(2));
-    fprintf('  uy → A = %.4f px,  phi = %.4f rad\n', fitResult_v(1), fitResult_v(2));
+    fprintf('  %s ux → A = %.4f px,  phi = %.4f rad\n', camName, fitResult_u(1), fitResult_u(2));
+    fprintf('  %s uy → A = %.4f px,  phi = %.4f rad\n', camName, fitResult_v(1), fitResult_v(2));
 
-    %% STORE IN OUTPUT STRUCT
-    peakLocking.(camName).hist_u    = counts_u;
-    peakLocking.(camName).hist_v    = counts_v;
-    peakLocking.(camName).bias_u    = bias_u;
-    peakLocking.(camName).bias_v    = bias_v;
-    peakLocking.(camName).bin_edges = binEdges;
+    % Store in cell arrays for post-parfor assembly
+    hist_u_all{a}      = counts_u;
+    hist_v_all{a}      = counts_v;
+    bias_u_all{a}      = bias_u;
+    bias_v_all{a}      = bias_v;
+    fitResult_u_all{a} = fitResult_u;
+    fitResult_v_all{a} = fitResult_v;
+    nVec_u_all{a}      = length(frac_ux_all);
+    nVec_v_all{a}      = length(frac_uy_all);
+
+end % parfor cameras
+
+%% ASSEMBLE OUTPUT STRUCT (after parfor — struct indexing not allowed inside)
+peakLocking = struct();
+for a = 1:nCams
+    camName = cameraList(a);
+    peakLocking.(camName).hist_u      = hist_u_all{a};
+    peakLocking.(camName).hist_v      = hist_v_all{a};
+    peakLocking.(camName).bias_u      = bias_u_all{a};
+    peakLocking.(camName).bias_v      = bias_v_all{a};
+    peakLocking.(camName).bin_edges   = binEdges;
     peakLocking.(camName).bin_centres = binCentres;
-    peakLocking.(camName).fit_u     = fitResult_u;   % [A, phi]
-    peakLocking.(camName).fit_v     = fitResult_v;   % [A, phi]
-    peakLocking.(camName).n_vectors_u = length(frac_ux_all);
-    peakLocking.(camName).n_vectors_v = length(frac_uy_all);
-
-end % cameras
+    peakLocking.(camName).fit_u       = fitResult_u_all{a};   % [A, phi]
+    peakLocking.(camName).fit_v       = fitResult_v_all{a};   % [A, phi]
+    peakLocking.(camName).n_vectors_u = nVec_u_all{a};
+    peakLocking.(camName).n_vectors_v = nVec_v_all{a};
+end
 
 %% SAVE
 outPath = fullfile(savePath, 'peakLocking.mat');
