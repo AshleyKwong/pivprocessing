@@ -27,6 +27,7 @@ PIV_stitchingv2.m
 *.asv
 *.autosave
 *.m~
+*.pdf
 *~
 
 # Simulink autosaves
